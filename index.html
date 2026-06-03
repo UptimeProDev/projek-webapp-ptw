@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PTW SafetyGuard</title>
+  <link rel="stylesheet" href="/style.css?v=3" />
+</head>
+<body>
+    <main class="auth-shell" data-mode="signup">
+      <section class="visual-panel" aria-label="Industrial safety portal">
+        <div class="visual-shade"></div>
+        <div class="visual-inner">
+          <div class="brand-mark" data-login-only>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3Z" />
+              <path d="M12 5v14" />
+            </svg>
+            <span>PTW SafetyGuard</span>
+          </div>
+
+          <div class="visual-copy">
+            <span class="eyebrow" id="visualEyebrow">Compliance Redefined</span>
+            <h1 id="visualTitle">Secure the Future of Industrial Safety.</h1>
+            <p id="visualBody">
+              Join the PTW SafeGuard network to streamline permits, manage
+              compliance, and ensure every worker returns home safely.
+            </p>
+          </div>
+
+          <div class="visual-metrics" id="visualMetrics">
+            <div>
+              <span>ISO 27001 Certified</span>
+            </div>
+            <div>
+              <span>256-bit Encryption</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="form-panel">
+        <div class="form-wrap">
+          <div class="auth-card">
+          <div class="mode-toggle" aria-label="Authentication mode">
+            <button type="button" data-switch="signup">Create Account</button>
+            <button type="button" data-switch="login">Sign In</button>
+          </div>
+
+          <form class="auth-form" id="signupForm" autocomplete="on">
+            <div class="form-heading">
+              <h2>Create Account</h2>
+              <p>
+                Register your industrial identity to access the Guardian suite.
+              </p>
+            </div>
+
+            <label class="field">
+              <span>Full Name</span>
+              <span class="input-wrap">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M20 21a8 8 0 0 0-16 0" />
+                  <circle cx="12" cy="7" r="4" />
+                </svg>
+                <input
+                  name="fullName"
+                  type="text"
+                  placeholder="Enter your full name"
+                  autocomplete="name"
+                  required
+                />
+              </span>
+            </label>
+
+            <label class="field">
+              <span>Work Email</span>
+              <span class="input-wrap">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="3" y="5" width="18" height="14" rx="2" />
+                  <path d="m3 7 9 6 9-6" />
+                </svg>
+                <input
+                  name="email"
+                  type="email"
+                  placeholder="name@company.com"
+                  autocomplete="email"
+                  required
+                />
+              </span>
+            </label>
+
+            <label class="field">
+              <span>Organization / Contractor Entity</span>
+              <span class="input-wrap">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 21V5h8v16" />
+                  <path d="M12 9h8v12" />
+                  <path d="M8 9h1M8 13h1M8 17h1M16 13h1M16 17h1" />
+                </svg>
+                <input
+                  name="organization"
+                  type="text"
+                  placeholder="e.g. Chevron / Global Engineering"
+                  autocomplete="organization"
+                  required
+                />
+              </span>
+            </label>
+
+            <label class="field">
+              <span>Primary Role</span>
+              <span class="input-wrap select-wrap">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="4" y="5" width="16" height="16" rx="2" />
+                  <path d="M9 3v4M15 3v4" />
+                  <circle cx="12" cy="13" r="3" />
+                  <path d="M8 19a4 4 0 0 1 8 0" />
+                </svg>
+                <select name="role" required>
+                  <option value="">Select your role</option>
+                  <option value="requester">Requester</option>
+                  <option value="supervisor">Supervisor</option>
+                  <option value="safety_officer">Safety Officer</option>
+                  <option value="approver">Approver</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </span>
+            </label>
+
+            <label class="field">
+              <span>Password</span>
+              <span class="input-wrap">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="5" y="11" width="14" height="10" rx="2" />
+                  <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+                </svg>
+                <input
+                  id="signupPassword"
+                  name="password"
+                  type="password"
+                  placeholder="Create a secure password"
+                  autocomplete="new-password"
+                  minlength="8"
+                  required
+                />
+              </span>
+            </label>
+
+            <div class="password-meter" aria-hidden="true">
+              <span id="passwordMeterBar"></span>
+              <small id="passwordMeterText">Enter password</small>
+            </div>
+
+            <label class="check-row">
+              <input name="acceptTerms" type="checkbox" required />
+              <span>
+                I agree to the <strong>Terms & Conditions</strong> and
+                acknowledge the <strong>Safety Compliance Standards</strong>.
+              </span>
+            </label>
+
+            <p class="form-message" id="signupMessage" role="status"></p>
+
+            <button class="primary-button" type="submit">
+              <span>Create Account</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 12h14" />
+                <path d="m13 6 6 6-6 6" />
+              </svg>
+            </button>
+
+            <div class="form-divider"></div>
+
+            <p class="switch-copy">
+              Already have an account?
+              <button type="button" data-switch="login">Log In</button>
+            </p>
+          </form>
+
+          <form class="auth-form is-hidden" id="loginForm" autocomplete="on">
+            <div class="form-heading">
+              <h2>Sign In</h2>
+              <p>Access the safety management dashboard.</p>
+            </div>
+
+            <label class="field">
+              <span>Employee ID or Email</span>
+              <span class="input-wrap">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M20 21a8 8 0 0 0-16 0" />
+                  <circle cx="12" cy="7" r="4" />
+                </svg>
+                <input
+                  name="login"
+                  type="text"
+                  placeholder="e.g. EMP-12345"
+                  autocomplete="username"
+                  required
+                />
+              </span>
+            </label>
+
+            <label class="field">
+              <span>Password</span>
+              <span class="input-wrap has-action">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="5" y="11" width="14" height="10" rx="2" />
+                  <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+                </svg>
+                <input
+                  id="loginPassword"
+                  name="password"
+                  type="password"
+                  placeholder="Password"
+                  autocomplete="current-password"
+                  required
+                />
+                <button
+                  class="icon-button"
+                  type="button"
+                  id="togglePassword"
+                  aria-label="Show password"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                </button>
+              </span>
+            </label>
+
+            <div class="login-options">
+              <label class="check-row compact">
+                <input name="remember" type="checkbox" />
+                <span>Remember Me</span>
+              </label>
+              <button type="button">Forgot Password?</button>
+            </div>
+
+            <p class="form-message" id="loginMessage" role="status"></p>
+
+            <button class="primary-button" type="submit">
+              <span>Sign In</span>
+            </button>
+
+            <div class="sso-divider">
+              <span></span>
+              <strong>OR CONTINUE WITH</strong>
+              <span></span>
+            </div>
+
+            <button class="secondary-button" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+              <span>Sign In with SSO</span>
+            </button>
+
+            <div class="form-divider"></div>
+
+            <p class="security-note">
+              Authorized personnel only. All access is logged and monitored for
+              compliance. <strong>Security Standards</strong>
+            </p>
+
+            <p class="switch-copy">
+              Need an account?
+              <button type="button" data-switch="signup">Create Account</button>
+            </p>
+          </form>
+
+          <section class="session-panel is-hidden" id="sessionPanel">
+            <div class="session-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3Z" />
+                <path d="m8.5 12 2.2 2.2L16 9" />
+              </svg>
+            </div>
+            <h2>Access Granted</h2>
+            <p id="sessionSummary"></p>
+            <dl class="session-details" id="sessionDetails"></dl>
+            <button class="primary-button" type="button" id="logoutButton">
+              <span>Sign Out</span>
+            </button>
+          </section>
+          </div>
+        </div>
+
+        <footer class="form-footer">
+          <span>&copy; 2026 PTW Guardian</span>
+          <span class="footer-icons" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.1 9a3 3 0 1 1 5.6 1.5c-.9.7-1.7 1.2-1.7 2.5" />
+              <path d="M12 17h.01" />
+            </svg>
+            <svg viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20" />
+            </svg>
+          </span>
+        </footer>
+      </section>
+  </main>
+  <script src="/app.js?v=3"></script>
+</body>
+</html>

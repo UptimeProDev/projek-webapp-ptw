@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Contractor Dashboard | PTW Guardian</title>
+  <link rel="stylesheet" href="/dashboard.css?v=2" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">PTW</span>
+        <div>
+          <h1>PTW Guardian</h1>
+          <p>Enterprise Safety</p>
+        </div>
+      </div>
+
+      <button class="new-permit-button" type="button" data-action="start-wizard">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        <span>New Permit</span>
+      </button>
+
+      <nav class="side-nav" aria-label="Requester navigation">
+        <button class="side-link is-active" type="button" data-view="dashboard">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="3" y="3" width="7" height="7" />
+            <rect x="14" y="3" width="7" height="7" />
+            <rect x="3" y="14" width="7" height="7" />
+            <rect x="14" y="14" width="7" height="7" />
+          </svg>
+          <span>Dashboard</span>
+        </button>
+        <button class="side-link" type="button" data-view="permits">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="5" y="4" width="14" height="17" rx="2" />
+            <path d="M9 4V2h6v2M9 9h6M9 13h6M9 17h4" />
+          </svg>
+          <span>Permits</span>
+        </button>
+        <button class="side-link" type="button" data-view="workers">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M16 21v-2a4 4 0 0 0-8 0v2" />
+            <circle cx="12" cy="8" r="4" />
+            <path d="M19 8v4M21 10h-4" />
+          </svg>
+          <span>Workers</span>
+        </button>
+        <button class="side-link" type="button" data-view="compliance">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+            <path d="m9 12 2 2 4-5" />
+          </svg>
+          <span>Compliance</span>
+        </button>
+      </nav>
+
+      <div class="side-footer">
+        <button class="side-link" type="button" data-view="support">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M9.1 9a3 3 0 1 1 5.6 1.5c-.9.7-1.7 1.2-1.7 2.5" />
+            <path d="M12 17h.01" />
+          </svg>
+          <span>Support</span>
+        </button>
+        <button class="side-link" type="button" id="logoutButton">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M10 17l5-5-5-5" />
+            <path d="M15 12H3" />
+            <path d="M21 3v18h-8" />
+          </svg>
+          <span>Log Out</span>
+        </button>
+      </div>
+    </aside>
+
+    <main class="app-main">
+      <header class="topbar">
+        <div class="search-box">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-3.4-3.4" />
+          </svg>
+          <input id="globalSearch" type="search" placeholder="Search permits, workers, or IDs..." />
+        </div>
+        <div class="topbar-actions">
+          <button class="icon-action" type="button" aria-label="Notifications">
+            <span class="dot"></span>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 7h18s-3 0-3-7" />
+              <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+            </svg>
+          </button>
+          <button class="icon-action" type="button" aria-label="Recent activity" data-action="show-activity">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 3-6.7" />
+              <path d="M3 3v6h6" />
+              <path d="M12 7v5l3 2" />
+            </svg>
+          </button>
+          <button class="icon-action" type="button" aria-label="Help" data-view="support">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.1 9a3 3 0 1 1 5.6 1.5c-.9.7-1.7 1.2-1.7 2.5" />
+              <path d="M12 17h.01" />
+            </svg>
+          </button>
+          <span class="topbar-divider"></span>
+          <div class="profile-chip">
+            <span>
+              <strong id="profileName">Requester</strong>
+              <small id="profileRole">Permit Requester</small>
+            </span>
+            <div class="avatar" id="userAvatar">R</div>
+          </div>
+        </div>
+      </header>
+
+      <section class="access-state is-hidden" id="accessState">
+        <h2>Requester Access Required</h2>
+        <p>Sign in as a requester to submit permits and sync dashboard data.</p>
+        <div class="access-actions">
+          <button class="black-button" type="button" id="demoLoginButton">Continue as Demo Requester</button>
+          <button class="soft-button" type="button" id="accessLoginButton">Go to Sign In</button>
+        </div>
+      </section>
+
+      <section class="workspace" id="appWorkspace" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <dialog class="app-dialog" id="workerDialog">
+    <form id="workerForm" method="dialog">
+      <div class="dialog-head">
+        <div>
+          <h2 id="workerDialogTitle">Add New Worker</h2>
+          <p>Personnel competency profile</p>
+        </div>
+        <button class="icon-action" type="button" data-action="close-worker-dialog" aria-label="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div class="form-grid">
+        <label>
+          <span>Full Name</span>
+          <input name="name" type="text" required />
+        </label>
+        <label>
+          <span>Employee ID</span>
+          <input name="employeeId" type="text" required />
+        </label>
+        <label>
+          <span>Role</span>
+          <input name="role" type="text" required />
+        </label>
+        <label>
+          <span>Discipline</span>
+          <input name="discipline" type="text" required />
+        </label>
+        <label>
+          <span>Competency</span>
+          <select name="status" required>
+            <option value="valid">Valid</option>
+            <option value="warning">Warning</option>
+            <option value="expired">Expired</option>
+          </select>
+        </label>
+        <label>
+          <span>Qualifications</span>
+          <input name="qualifications" type="text" placeholder="Safety Induction, Hot Work" />
+        </label>
+      </div>
+      <div class="dialog-actions">
+        <button class="soft-button" type="button" data-action="close-worker-dialog">Cancel</button>
+        <button class="black-button" type="submit">Save Worker</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="app-dialog compact-dialog" id="inviteDialog">
+    <form id="inviteForm" method="dialog">
+      <div class="dialog-head">
+        <div>
+          <h2>Invite External Contractor</h2>
+          <p>Temporary assignment for this permit</p>
+        </div>
+        <button class="icon-action" type="button" data-action="close-invite-dialog" aria-label="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div class="form-grid one-column">
+        <label>
+          <span>Name</span>
+          <input name="name" type="text" required />
+        </label>
+        <label>
+          <span>Email</span>
+          <input name="email" type="email" required />
+        </label>
+        <label>
+          <span>Company</span>
+          <input name="company" type="text" required />
+        </label>
+      </div>
+      <div class="dialog-actions">
+        <button class="soft-button" type="button" data-action="close-invite-dialog">Cancel</button>
+        <button class="black-button" type="submit">Add to Permit</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast is-hidden" id="toast" role="status"></div>
+  <script src="/dashboard.js?v=2"></script>
+</body>
+</html>
