@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Worker Portal | PTW Guardian</title>
+  <link rel="stylesheet" href="/worker.css?v=5" />
+</head>
+<body>
+  <div class="worker-shell">
+    <aside class="worker-rail" aria-label="Worker navigation">
+      <div class="brand">
+        <div class="brand-mark">PTW</div>
+        <div>
+          <h1>PTW Guardian</h1>
+          <p>Worker Portal</p>
+        </div>
+      </div>
+
+      <nav class="worker-nav">
+        <button class="nav-item active" type="button" data-view="dashboard">My Permits</button>
+        <button class="nav-item" type="button" data-view="active">Active Work</button>
+        <button class="nav-item" type="button" data-view="extension">Extension Request</button>
+        <button class="nav-item" type="button" data-view="completion">History</button>
+      </nav>
+
+      <div class="worker-footer">
+        <button class="nav-item" type="button" onclick="window.location.href='/account'">Account</button>
+        <button class="nav-item" type="button" onclick="window.location.href='/support'">Support</button>
+        <button class="nav-item signout" type="button" id="logoutButton">Logout</button>
+      </div>
+    </aside>
+
+    <main class="worker-main">
+      <header class="worker-topbar">
+        <div>
+          <span class="eyebrow">Contractor / Worker Flow</span>
+          <h2 id="pageTitle">My Assigned Permits</h2>
+          <p id="pageSubtitle">Track permit status, time remaining, extension requests, and work completion.</p>
+        </div>
+        <div class="topbar-actions">
+          <label class="search">
+            <span class="sr-only">Search assigned permits</span>
+            <input id="searchInput" type="search" placeholder="Search work type, permit ID, or location" />
+          </label>
+          <div class="notification-wrap">
+            <button class="icon-button" type="button" id="notificationButton" aria-label="Open notifications" aria-expanded="false" aria-controls="notificationPanel">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 22a2.4 2.4 0 0 0 2.3-1.8H9.7A2.4 2.4 0 0 0 12 22ZM5 17h14l-1.7-2.3V10a5.3 5.3 0 0 0-4.2-5.2V3a1.1 1.1 0 0 0-2.2 0v1.8A5.3 5.3 0 0 0 6.7 10v4.7L5 17Z" />
+              </svg>
+              <span class="notification-dot" aria-hidden="true"></span>
+            </button>
+            <div class="notification-panel" id="notificationPanel" hidden>
+              <div class="notification-head">
+                <div>
+                  <strong>Notifications</strong>
+                  <span id="notificationCount">0 items</span>
+                </div>
+                <button class="link-button" type="button" id="notificationCloseButton">Close</button>
+              </div>
+              <div class="notification-list" id="notificationList"></div>
+            </div>
+          </div>
+          <button class="icon-button" type="button" id="refreshButton" aria-label="Refresh worker portal">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h8V3l-3.3 3.3Z" />
+            </svg>
+          </button>
+          <button class="profile" type="button" id="accountButton" aria-label="Open account settings">
+            <span class="profile-copy">
+              <strong id="profileName">Worker</strong>
+              <span id="profileRole">Assigned worker</span>
+            </span>
+            <span class="profile-avatar" id="profileAvatar">W</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="auth-warning hidden" id="workerWarning">
+        <strong>Worker access required</strong>
+        <p>Sign in with a contractor or worker account to view assigned permits.</p>
+        <a class="dark-button" href="/login">Go to sign in</a>
+      </div>
+
+      <section class="summary-grid" aria-label="Worker summary">
+        <article>
+          <span>Assigned</span>
+          <strong id="assignedCount">0</strong>
+          <small>Visible permits</small>
+        </article>
+        <article>
+          <span>Active</span>
+          <strong id="activeCount">0</strong>
+          <small>Live work</small>
+        </article>
+        <article class="urgent">
+          <span>Countdown</span>
+          <strong id="countdownCount">0</strong>
+          <small>Due within one hour</small>
+        </article>
+        <article>
+          <span>Completed</span>
+          <strong id="completedCount">0</strong>
+          <small>Submitted checklists</small>
+        </article>
+      </section>
+
+      <div class="status-line" id="statusLine">Worker portal ready.</div>
+
+      <section class="worker-layout" id="workerWorkspace">
+        <div class="permit-list">
+          <div class="list-head">
+            <div>
+              <h3 id="queueTitle">Assigned Permits</h3>
+              <p id="queueHint">Permits where your employee ID is part of the assigned worker list.</p>
+            </div>
+            <span class="pill" id="queueCount">0 items</span>
+          </div>
+          <div class="queue-items" id="queueItems"></div>
+        </div>
+
+        <div class="permit-detail" id="permitDetail"></div>
+      </section>
+
+      <section class="emergency-strip" id="emergencyStrip">
+        <div>
+          <strong>Emergency Stop Work</strong>
+          <p>Use this if immediate danger is observed. It records stop-work on every active permit assigned to you.</p>
+        </div>
+        <button class="stop-work-button" type="button" id="globalStopButton">Stop Work</button>
+      </section>
+
+      <section class="log-section hidden" id="completionSection">
+        <div class="log-card">
+          <div class="list-head">
+            <div>
+              <h3>Completion Log</h3>
+              <p>Completion and extension events from this worker session.</p>
+            </div>
+            <span class="pill" id="logCount">0 records</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Permit</th>
+                <th>Action</th>
+                <th>Note</th>
+              </tr>
+            </thead>
+            <tbody id="logBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/worker.js?v=6"></script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Activate Worker Account | PTW Guardian</title>
+  <link rel="stylesheet" href="/activate.css?v=1" />
+</head>
+<body>
+  <main class="activation-shell">
+    <section class="activation-card">
+      <div class="brand">
+        <div class="brand-mark">PTW</div>
+        <div>
+          <h1>Activate Account</h1>
+          <p>Set your worker portal password</p>
+        </div>
+      </div>
+
+      <form id="activationForm" class="activation-form">
+        <label class="field">
+          <span>New password</span>
+          <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required />
+        </label>
+        <label class="field">
+          <span>Confirm password</span>
+          <input id="confirmPassword" name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required />
+        </label>
+        <p class="message" id="message" role="status"></p>
+        <button class="primary-button" type="submit">Activate account</button>
+      </form>
+
+      <a class="login-link" href="/login">Back to sign in</a>
+    </section>
+  </main>
+
+  <script src="/activate.js?v=1"></script>
+</body>
+</html>

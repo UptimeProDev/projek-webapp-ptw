@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.*
+!.env.example
+ptw.db
+ptw.db-*
+uploads/
+*.log
+server-*.log
+.agents/
+.codex/
+npm-debug.log*

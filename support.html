@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Support | PTW Guardian</title>
+  <link rel="stylesheet" href="/support.css?v=1" />
+</head>
+<body>
+  <main class="support-shell">
+    <header class="support-topbar">
+      <div class="brand">
+        <div class="brand-mark">PTW</div>
+        <div>
+          <h1>Support</h1>
+          <p>Help desk</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <a class="ghost-button" id="backLink" href="/dashboard">Back to dashboard</a>
+        <button class="dark-button" type="button" id="logoutButton">Sign Out</button>
+      </div>
+    </header>
+
+    <section class="support-layout">
+      <section class="support-panel">
+        <div class="section-head">
+          <h2>Submit Request</h2>
+          <p id="userLine">Signed in user</p>
+        </div>
+
+        <form class="support-form" id="supportForm">
+          <label class="field">
+            <span>Topic</span>
+            <select id="topic" name="topic" required>
+              <option value="Permit issue">Permit issue</option>
+              <option value="Worker profile">Worker profile</option>
+              <option value="Account access">Account access</option>
+              <option value="System error">System error</option>
+              <option value="Other">Other</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Priority</span>
+            <select id="priority" name="priority" required>
+              <option value="Normal">Normal</option>
+              <option value="High">High</option>
+              <option value="Urgent">Urgent</option>
+            </select>
+          </label>
+          <label class="field wide">
+            <span>Subject</span>
+            <input id="subject" name="subject" maxlength="120" required />
+          </label>
+          <label class="field wide">
+            <span>Details</span>
+            <textarea id="details" name="details" rows="7" maxlength="1200" required></textarea>
+          </label>
+          <div class="form-actions wide">
+            <button class="dark-button" type="submit">Submit request</button>
+          </div>
+        </form>
+      </section>
+
+      <aside class="support-side">
+        <section class="contact-card">
+          <h2>Contact</h2>
+          <dl>
+            <div>
+              <dt>Email</dt>
+              <dd><a href="mailto:hse-control@example.com">hse-control@example.com</a></dd>
+            </div>
+            <div>
+              <dt>Phone</dt>
+              <dd>+60 3-5550 1188</dd>
+            </div>
+            <div>
+              <dt>Hours</dt>
+              <dd>24/7 emergency support</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section class="history-card">
+          <div class="history-head">
+            <h2>Recent Requests</h2>
+            <button class="link-button" type="button" id="clearHistoryButton">Clear</button>
+          </div>
+          <div class="history-list" id="historyList"></div>
+        </section>
+      </aside>
+    </section>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </main>
+
+  <script src="/support.js?v=1"></script>
+</body>
+</html>

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin Lane 2 | PTW Guardian</title>
+  <link rel="stylesheet" href="/admin.css?v=lane2-3" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700;900&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">PTW</div>
+        <div class="brand-text">
+          <h1>PTW Guardian</h1>
+          <p>Lane 2 Administration</p>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-item active" type="button">Worker Review</button>
+        <button class="nav-item" type="button">Draft Review</button>
+        <button class="nav-item" type="button">Audit Trails</button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="side-small" type="button" onclick="window.location.href='/account'">Account</button>
+        <button class="side-small" id="supportButton" type="button">Support</button>
+        <button class="side-small" id="adminLogoutButton" type="button">Logout</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="search">
+          <input id="searchInput" type="search" aria-label="Search admin records" placeholder="Search workers, drafts, or audit records...">
+        </div>
+        <div class="topbar-actions">
+          <div class="notification-wrap">
+            <button class="icon-button" type="button" id="notificationButton" aria-label="Open notifications" aria-expanded="false" aria-controls="notificationPanel">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 22a2.4 2.4 0 0 0 2.3-1.8H9.7A2.4 2.4 0 0 0 12 22ZM5 17h14l-1.7-2.3V10a5.3 5.3 0 0 0-4.2-5.2V3a1.1 1.1 0 0 0-2.2 0v1.8A5.3 5.3 0 0 0 6.7 10v4.7L5 17Z" />
+              </svg>
+              <span class="notification-dot" aria-hidden="true"></span>
+            </button>
+            <div class="notification-panel" id="notificationPanel" hidden>
+              <div class="notification-head">
+                <div>
+                  <strong>Notifications</strong>
+                  <span id="notificationCount">0 items</span>
+                </div>
+                <button class="link-button" type="button" id="notificationCloseButton">Close</button>
+              </div>
+              <div class="notification-list" id="notificationList"></div>
+            </div>
+          </div>
+          <button class="icon-button" type="button" id="topbarRefreshButton" aria-label="Refresh admin data">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h8V3l-3.3 3.3Z" />
+            </svg>
+          </button>
+          <button class="profile" type="button" id="accountButton" aria-label="Open account settings">
+            <div class="profile-info">
+              <div class="profile-name">Admin User</div>
+              <div class="profile-role">Admin - Lane 2</div>
+            </div>
+            <div class="avatar">AD</div>
+          </button>
+        </div>
+      </header>
+
+      <section class="workspace">
+        <div class="page-head">
+          <div>
+            <h2>Worker Profile Review</h2>
+            <p class="muted">Review requester-submitted worker profiles, certifications, and permit authorizations.</p>
+          </div>
+          <div class="actions">
+            <button class="btn" id="filtersToggle" type="button">Filters</button>
+          </div>
+        </div>
+
+        <div class="filter-panel hidden" id="filterPanel">
+          <label class="field filter-field">
+            <span>Status</span>
+            <span class="input-wrap">
+              <select id="filterStatus">
+                <option value="">All statuses</option>
+                <option value="Submitted">Submitted</option>
+                <option value="Valid">Valid</option>
+                <option value="Returned">Returned</option>
+              </select>
+            </span>
+          </label>
+          <label class="field filter-field">
+            <span>Permit Type</span>
+            <span class="input-wrap">
+              <select id="filterPermit">
+                <option value="">All permit types</option>
+                <option value="Hot Work">Hot Work</option>
+                <option value="Confined Space">Confined Space</option>
+                <option value="Electrical Isolation">Electrical Isolation</option>
+                <option value="Work at Height">Work at Height</option>
+                <option value="Line Breaking">Line Breaking</option>
+                <option value="General Maintenance">General Maintenance</option>
+              </select>
+            </span>
+          </label>
+          <button class="btn small secondary" id="clearFiltersButton" type="button">Clear filters</button>
+        </div>
+
+        <div class="stats">
+          <div class="stat-card critical">
+            <div class="stat-label">INVALID WORKERS</div>
+            <div class="stat-value"><span class="kpi" data-kpi="expired_licenses_count">0</span> <span class="muted small">Critical</span></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">DRAFT REVIEW QUEUE</div>
+            <div class="stat-value"><span class="kpi" data-kpi="verification_queue_count">0</span> <span class="muted small">Admin check</span></div>
+          </div>
+        </div>
+
+        <div class="auth-warning hidden" id="adminWarning">
+          <div class="warning-box">
+            <h3>Admin access required</h3>
+            <p>Sign in as an admin account to access Lane 2 administrative controls.</p>
+            <a class="btn small" href="/login">Go to sign in</a>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <div class="section-controls">
+            <div class="status-pill" id="sectionStatus">Manage worker competency, draft checks, and audit logs.</div>
+            <div class="section-actions">
+              <button class="btn small" id="refreshButton" type="button">Refresh</button>
+            </div>
+          </div>
+
+          <div class="section-panels">
+            <section id="manageCompetencySection" class="section-panel active">
+              <table class="competency-table" aria-describedby="competencyEmpty">
+                <thead>
+                  <tr>
+                    <th>Worker Name</th>
+                    <th>Position</th>
+                    <th>Company / Contact</th>
+                    <th>Permit Types</th>
+                    <th>Certifications</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="competencyBody"></tbody>
+              </table>
+
+              <div class="empty-state" id="competencyEmpty" role="status" aria-live="polite">
+                <strong>No worker records</strong>
+                <p class="muted">Requester-submitted worker profiles appear here for Admin review.</p>
+              </div>
+
+              <div class="table-footer">
+                <div class="rows-info" id="competencyCount">Showing 0 of 0 entries</div>
+              </div>
+
+            </section>
+
+            <section id="permitQueueSection" class="section-panel hidden">
+              <div class="queue-grid">
+                <div class="queue-list">
+                  <div class="list-head">
+                    <div>
+                      <h3>Draft Permit Review</h3>
+                      <p class="muted">Clerical package check before formal submission.</p>
+                    </div>
+                    <span class="badge pending" id="queueCount">0 items</span>
+                  </div>
+                  <div id="queueItems" class="queue-items"></div>
+                  <div id="queueEmpty" class="empty-state hidden" role="status" aria-live="polite">
+                    <strong>No drafts awaiting admin review</strong>
+                    <p class="muted">Draft and returned permits appear here for Lane 2 routing.</p>
+                  </div>
+                </div>
+                <div class="queue-detail" id="queueDetail"></div>
+              </div>
+            </section>
+
+            <section id="permitClosureSection" class="section-panel hidden">
+              <div class="queue-grid">
+                <div class="queue-list">
+                  <div class="list-head">
+                    <div>
+                      <h3>Pending Approval Monitor</h3>
+                      <p class="muted">Permits formally submitted by Admin Lane 2.</p>
+                    </div>
+                    <span class="badge pending" id="routingCount">0 items</span>
+                  </div>
+                  <div id="routingItems" class="queue-items"></div>
+                </div>
+                <div class="queue-detail" id="routingDetail"></div>
+              </div>
+            </section>
+
+            <section id="auditTrailsSection" class="section-panel hidden">
+              <div class="detail-card">
+                <div class="list-head">
+                  <div>
+                    <h3>Admin Audit Trail</h3>
+                    <p class="muted">Track Lane 2 worker, draft, and routing actions.</p>
+                  </div>
+                  <span class="badge pending" id="auditCount">0 records</span>
+                </div>
+                <table class="competency-table audit-table">
+                  <thead>
+                    <tr>
+                      <th>Timestamp</th>
+                      <th>Actor</th>
+                      <th>Action</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="auditBody"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog class="review-dialog" id="workerReviewDialog">
+    <div class="review-shell">
+      <div class="review-head">
+        <div>
+          <p class="review-kicker">Worker Profile Review</p>
+          <h3 id="workerReviewTitle">Worker profile</h3>
+          <p class="muted" id="workerReviewSubtitle">Review worker details before making a decision.</p>
+        </div>
+        <button class="btn small secondary" type="button" data-close-worker-review>Close</button>
+      </div>
+
+      <div class="review-body" id="workerReviewBody"></div>
+
+      <div class="review-decision">
+        <label class="review-return-field">
+          <span>Return reason</span>
+          <textarea id="workerReturnReason" placeholder="Required only when returning for correction"></textarea>
+        </label>
+        <div class="button-row">
+          <button class="btn small secondary" type="button" data-close-worker-review>Cancel</button>
+          <button class="btn small danger" type="button" id="returnWorkerButton">Return for Correction</button>
+          <button class="btn small" type="button" id="approveWorkerButton">Mark Valid</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="/admin.js?v=lane2-7"></script>
+</body>
+</html>

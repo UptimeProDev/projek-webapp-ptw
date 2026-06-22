@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Safety Officer Lane 3 | PTW Guardian</title>
+  <link rel="stylesheet" href="/safety.css?v=lane6" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700;900&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="safety-shell">
+    <aside class="safety-rail">
+      <div class="brand">
+        <div class="brand-mark">HSE</div>
+        <div>
+          <h1>Safety Officer</h1>
+          <p>Lane 3 Technical Risk</p>
+        </div>
+      </div>
+
+      <nav class="safety-nav" aria-label="Safety officer work queues">
+        <button class="nav-item active" type="button" data-view="all">All Reviews</button>
+        <button class="nav-item" type="button" data-view="stage1">Stage 1 MOS</button>
+        <button class="nav-item" type="button" data-view="stage2">Stage 2 Execution</button>
+        <button class="nav-item" type="button" data-view="audit">Review Log</button>
+      </nav>
+      <div class="rail-footer">
+        <button class="rail-link" type="button" onclick="window.location.href='/account'">Account</button>
+        <button class="rail-link" type="button" onclick="window.location.href='/support'">Support</button>
+        <button class="rail-link" id="logoutButton" type="button">Logout</button>
+      </div>
+    </aside>
+
+    <main class="safety-main">
+      <header class="safety-topbar">
+        <div>
+          <span class="eyebrow">Virtual HSE Safety Officer</span>
+          <h2 id="pageTitle">Safety Officer Dashboard</h2>
+          <p id="pageSubtitle">Review active safety work, stage decisions, emergency approvals, and returned permits.</p>
+        </div>
+        <div class="profile">
+          <div class="notification-wrap">
+            <button class="icon-button" type="button" id="notificationButton" aria-label="Open notifications" aria-expanded="false" aria-controls="notificationPanel">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 22a2.4 2.4 0 0 0 2.3-1.8H9.7A2.4 2.4 0 0 0 12 22ZM5 17h14l-1.7-2.3V10a5.3 5.3 0 0 0-4.2-5.2V3a1.1 1.1 0 0 0-2.2 0v1.8A5.3 5.3 0 0 0 6.7 10v4.7L5 17Z" />
+              </svg>
+              <span class="notification-dot" aria-hidden="true"></span>
+            </button>
+            <div class="notification-panel" id="notificationPanel" hidden>
+              <div class="notification-head">
+                <div>
+                  <strong>Notifications</strong>
+                  <span id="notificationCount">0 items</span>
+                </div>
+                <button class="link-button" type="button" id="notificationCloseButton">Close</button>
+              </div>
+              <div class="notification-list" id="notificationList"></div>
+            </div>
+          </div>
+          <button class="icon-button" id="refreshButton" type="button" aria-label="Refresh safety data">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h8V3l-3.3 3.3Z" />
+            </svg>
+          </button>
+          <button class="profile-button" type="button" id="accountButton" aria-label="Open account settings">
+            <span class="profile-copy">
+              <strong id="profileName">Safety Officer</strong>
+              <span id="profileRole">Lane 3</span>
+            </span>
+            <span class="profile-avatar" id="profileAvatar">SO</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="auth-warning hidden" id="safetyWarning">
+        <strong>Safety officer access required</strong>
+        <p>Sign in with a safety officer account to access Lane 3 technical reviews.</p>
+        <a class="dark-button" href="/login">Go to sign in</a>
+      </div>
+
+      <section class="summary-grid" aria-label="Safety review summary">
+        <article>
+          <span>Stage 1 MOS</span>
+          <strong id="stage1Count">0</strong>
+          <small>Submitted methodology</small>
+        </article>
+        <article>
+          <span>Stage 2 Execution</span>
+          <strong id="stage2Count">0</strong>
+          <small>Scheduled site validation</small>
+        </article>
+        <article class="critical">
+          <span>Emergency</span>
+          <strong id="emergencyCount">0</strong>
+          <small>48-hour maximum review</small>
+        </article>
+        <article>
+          <span>Returned</span>
+          <strong id="returnedCount">0</strong>
+          <small>Correction required</small>
+        </article>
+      </section>
+
+      <section class="review-layout" id="reviewWorkspace">
+        <div class="permit-list">
+          <div class="list-head">
+            <div>
+              <h3 id="queueTitle">All Safety Officer Permits</h3>
+              <p id="queueHint">Select any permit to inspect requester details and complete the current safety stage.</p>
+            </div>
+            <span class="pill" id="queueCount">0 items</span>
+          </div>
+          <input class="queue-search" id="searchInput" type="search" placeholder="Search permit, location, requester, hazard">
+          <div class="queue-items" id="queueItems"></div>
+        </div>
+
+        <div class="permit-detail" id="permitDetail">
+          <div class="empty-card">
+            <strong>Select a permit</strong>
+            <p>Lane 3 decisions are based on technical risk evidence, not clerical completeness alone.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="audit-section hidden" id="auditSection">
+        <div class="audit-card">
+          <div class="list-head">
+            <div>
+              <h3>Safety Review Log</h3>
+              <p>History of permit decisions and routing actions across Safety Officer visible permits.</p>
+            </div>
+            <span class="pill" id="auditCount">0 records</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Permit</th>
+                <th>Stage</th>
+                <th>Decision</th>
+              </tr>
+            </thead>
+            <tbody id="auditBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/safety.js?v=lane6"></script>
+</body>
+</html>

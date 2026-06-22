@@ -1,0 +1,135 @@
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --ink: #101820;
+  --muted: #66727d;
+  --line: #d9e0e6;
+  --nav: #17212b;
+  --danger: #b42318;
+  --success: #087443;
+  --shadow: 0 18px 44px rgba(16, 24, 32, 0.12);
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.activation-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.activation-card {
+  width: min(460px, 100%);
+  padding: 26px;
+  display: grid;
+  gap: 22px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-mark {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #f6c744;
+  color: #101820;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.brand h1,
+.brand p,
+.message {
+  margin: 0;
+}
+
+.brand h1 {
+  font-size: 24px;
+}
+
+.brand p {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.activation-form {
+  display: grid;
+  gap: 14px;
+}
+
+.field {
+  display: grid;
+  gap: 7px;
+}
+
+.field span {
+  color: #26313a;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.field input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #b9c5cf;
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--ink);
+}
+
+.primary-button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--nav);
+  color: #ffffff;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.message {
+  min-height: 20px;
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.message.success {
+  color: var(--success);
+}
+
+.login-link {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
+  text-decoration: none;
+}

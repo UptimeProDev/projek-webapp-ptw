@@ -1,0 +1,2267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Requester Dashboard | PTW Guardian</title>
+  <style>
+    :root {
+      --bg: #f4f6f8;
+      --surface: #ffffff;
+      --surface-soft: #eef2f5;
+      --ink: #101820;
+      --muted: #5f6b76;
+      --line: #d8dee4;
+      --line-strong: #b9c3cc;
+      --nav: #17212b;
+      --nav-soft: #263341;
+      --blue: #1f6feb;
+      --blue-soft: #e8f0ff;
+      --green: #12805c;
+      --green-soft: #e5f5ee;
+      --amber: #a86600;
+      --amber-soft: #fff2d8;
+      --red: #c7362f;
+      --red-soft: #fde8e6;
+      --shadow: 0 18px 42px rgba(16, 24, 32, 0.1);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      min-height: 100%;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    svg {
+      width: 20px;
+      height: 20px;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 2;
+    }
+
+    .app-shell {
+      min-height: 100svh;
+      display: grid;
+      grid-template-columns: 272px minmax(0, 1fr);
+    }
+
+    .sidebar {
+      min-height: 100svh;
+      padding: 24px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      background: var(--nav);
+      color: #ffffff;
+    }
+
+    .brand {
+      display: grid;
+      grid-template-columns: 46px 1fr;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .brand-mark {
+      width: 46px;
+      height: 46px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: #f6c744;
+      color: #101820;
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: 0.04em;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 20px;
+      line-height: 1.1;
+      font-weight: 850;
+    }
+
+    .brand p {
+      margin: 4px 0 0;
+      color: #b9c5d0;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .side-nav,
+    .side-foot {
+      display: grid;
+      gap: 8px;
+    }
+
+    .side-foot {
+      margin-top: auto;
+      padding-top: 20px;
+      border-top: 1px solid rgba(255, 255, 255, 0.14);
+    }
+
+    .nav-item {
+      min-height: 46px;
+      padding: 0 14px;
+      display: grid;
+      grid-template-columns: 22px 1fr;
+      align-items: center;
+      gap: 12px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: transparent;
+      color: #cbd5df;
+      text-align: left;
+      font-weight: 750;
+    }
+
+    .nav-item:hover,
+    .nav-item.is-active {
+      background: var(--nav-soft);
+      color: #ffffff;
+    }
+
+    .nav-item.is-active {
+      border-color: rgba(246, 199, 68, 0.46);
+    }
+
+    .main {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: 72px 1fr;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      min-width: 0;
+      height: 72px;
+      padding: 0 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 22px;
+      background: rgba(255, 255, 255, 0.94);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(12px);
+    }
+
+    .search {
+      width: min(520px, 46vw);
+      height: 42px;
+      padding: 0 13px;
+      display: grid;
+      grid-template-columns: 22px 1fr;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #f9fafb;
+      color: var(--muted);
+    }
+
+    .search input {
+      width: 100%;
+      min-width: 0;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--ink);
+    }
+
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .notification-wrap {
+      position: relative;
+      display: inline-flex;
+    }
+
+    .icon-button {
+      position: relative;
+      width: 40px;
+      height: 40px;
+      display: inline-grid;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface);
+      color: #313b45;
+    }
+
+    .icon-button:hover {
+      border-color: var(--line-strong);
+      background: #f8fafc;
+    }
+
+    .alert-dot {
+      position: absolute;
+      top: 7px;
+      right: 8px;
+      width: 8px;
+      height: 8px;
+      border: 2px solid #ffffff;
+      border-radius: 999px;
+      background: var(--red);
+    }
+
+    .notification-panel {
+      position: absolute;
+      top: calc(100% + 10px);
+      right: 0;
+      z-index: 30;
+      width: min(360px, calc(100vw - 32px));
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      text-align: left;
+    }
+
+    .notification-head {
+      padding: 14px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .notification-head strong,
+    .notification-head span {
+      display: block;
+    }
+
+    .notification-head strong {
+      font-size: 15px;
+      font-weight: 850;
+    }
+
+    .notification-head span {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .link-button {
+      border: 0;
+      background: transparent;
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 850;
+      padding: 2px 0;
+    }
+
+    .notification-list {
+      max-height: 360px;
+      overflow-y: auto;
+    }
+
+    .notification-item {
+      width: 100%;
+      padding: 13px 14px;
+      display: grid;
+      gap: 4px;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      background: #ffffff;
+      color: var(--ink);
+      text-align: left;
+    }
+
+    .notification-item:hover {
+      background: #f8fafc;
+    }
+
+    .notification-item strong {
+      font-size: 13px;
+      font-weight: 850;
+    }
+
+    .notification-item span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .notification-item small {
+      color: var(--blue);
+      font-size: 11px;
+      font-weight: 850;
+      text-transform: uppercase;
+    }
+
+    .notification-empty {
+      margin: 0;
+      padding: 18px 14px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .profile {
+      display: grid;
+      grid-template-columns: 1fr 40px;
+      align-items: center;
+      gap: 10px;
+      text-align: right;
+      min-width: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      font: inherit;
+      padding: 0;
+    }
+
+    .profile:hover .avatar,
+    .profile:focus-visible .avatar {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+    }
+
+    .profile strong,
+    .profile span {
+      display: block;
+      white-space: nowrap;
+    }
+
+    .profile strong {
+      font-size: 14px;
+      font-weight: 850;
+    }
+
+    .profile span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .avatar {
+      width: 40px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: #17212b;
+      color: #ffffff;
+      font-weight: 850;
+      overflow: hidden;
+    }
+
+    .avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .workspace {
+      min-width: 0;
+      padding: 34px 40px 112px;
+    }
+
+    .page-head {
+      margin-bottom: 28px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--green);
+      content: "";
+    }
+
+    .page-head h2 {
+      margin: 8px 0;
+      font-size: 34px;
+      line-height: 1.08;
+      font-weight: 900;
+      letter-spacing: 0;
+    }
+
+    .page-head p {
+      max-width: 680px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.5;
+    }
+
+    .date-chip {
+      min-height: 40px;
+      padding: 0 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface);
+      color: #2e3842;
+      font-size: 13px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(180px, 1fr));
+      gap: 18px;
+      margin-bottom: 26px;
+    }
+
+    .summary-card {
+      min-height: 154px;
+      padding: 20px;
+      display: grid;
+      align-content: space-between;
+      gap: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: 0 10px 26px rgba(16, 24, 32, 0.06);
+    }
+
+    .summary-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .summary-icon {
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      border-radius: 7px;
+      color: #27323c;
+      background: var(--surface-soft);
+    }
+
+    .summary-icon.draft {
+      color: var(--blue);
+      background: var(--blue-soft);
+    }
+
+    .summary-icon.pending {
+      color: var(--amber);
+      background: var(--amber-soft);
+    }
+
+    .summary-icon.active {
+      color: var(--green);
+      background: var(--green-soft);
+    }
+
+    .summary-icon.rejected {
+      color: var(--red);
+      background: var(--red-soft);
+    }
+
+    .summary-card span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .summary-card strong {
+      display: block;
+      margin-top: 10px;
+      font-size: 42px;
+      line-height: 1;
+      font-weight: 950;
+    }
+
+    .summary-note {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    .summary-note i {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: currentColor;
+    }
+
+    .content-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 24px;
+      align-items: start;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .panel-head {
+      min-height: 68px;
+      padding: 0 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .panel-head h3 {
+      margin: 0;
+      font-size: 19px;
+      line-height: 1.2;
+      font-weight: 900;
+    }
+
+    .table-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .filter-button {
+      min-height: 36px;
+      padding: 0 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #f9fafb;
+      color: #303b46;
+      font-size: 13px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .filter-button.is-active {
+      border-color: #1f6feb;
+      background: var(--blue-soft);
+      color: #2154b0;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      min-width: 760px;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 16px 22px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: middle;
+      font-size: 14px;
+    }
+
+    th {
+      background: #f7f9fb;
+      color: #5b6672;
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    tbody tr:hover {
+      background: #fbfcfd;
+    }
+
+    .permit-id {
+      color: #18212b;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .work-type {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: #1d2731;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .type-mark {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border-radius: 6px;
+      background: #edf1f5;
+      color: #32404e;
+    }
+
+    .location {
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .status-pill {
+      min-height: 28px;
+      padding: 0 10px;
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .status-pill.draft {
+      background: var(--blue-soft);
+      color: #2154b0;
+    }
+
+    .status-pill.pending {
+      background: var(--amber-soft);
+      color: var(--amber);
+    }
+
+    .status-pill.active {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .status-pill.rejected {
+      background: var(--red-soft);
+      color: var(--red);
+    }
+
+    .status-pill.closed,
+    .status-pill.cancelled {
+      background: #edf1f5;
+      color: #53606b;
+    }
+
+    .row-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .row-button {
+      min-height: 34px;
+      padding: 0 11px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #ffffff;
+      color: #25313d;
+      font-size: 13px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+
+    .row-button:hover {
+      border-color: var(--line-strong);
+      background: #f8fafc;
+    }
+
+    .row-button.primary {
+      border-color: #17212b;
+      background: #17212b;
+      color: #ffffff;
+    }
+
+    .row-button.danger {
+      border-color: #f0c0bd;
+      color: var(--red);
+    }
+
+    .route-note {
+      min-height: 30px;
+      padding: 0 10px;
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      background: var(--amber-soft);
+      color: var(--amber);
+      font-size: 12px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+
+    .worker-return-note {
+      margin-top: 8px;
+      max-width: 320px;
+      padding: 9px 10px;
+      display: grid;
+      gap: 3px;
+      border: 1px solid #f0c0bd;
+      border-radius: 6px;
+      background: var(--red-soft);
+      color: #6d1f1a;
+      font-size: 12px;
+      line-height: 1.35;
+      font-weight: 750;
+    }
+
+    .worker-return-note strong {
+      color: var(--red);
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .worker-cert-item {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .certification-file-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .certification-file-actions .row-button,
+    .worker-cert-item .row-button {
+      min-height: 30px;
+      padding: 0 10px;
+      font-size: 12px;
+    }
+
+    .worker-row td {
+      padding-top: 20px;
+      padding-bottom: 20px;
+      vertical-align: top;
+    }
+
+    .worker-cell {
+      min-width: 0;
+      display: grid;
+      gap: 9px;
+    }
+
+    .worker-name-line {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      min-width: 0;
+    }
+
+    .worker-avatar {
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      border-radius: 8px;
+      background: #17212b;
+      color: #ffffff;
+      font-size: 14px;
+      font-weight: 950;
+    }
+
+    .worker-name {
+      color: #17212b;
+      font-size: 15px;
+      font-weight: 950;
+      line-height: 1.2;
+    }
+
+    .worker-subline {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      line-height: 1.35;
+    }
+
+    .worker-meta-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .worker-meta {
+      max-width: 100%;
+      min-height: 28px;
+      padding: 5px 8px;
+      display: inline-flex;
+      align-items: center;
+      border-radius: 6px;
+      background: #f1f5f9;
+      color: #44515d;
+      font-size: 12px;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+
+    .worker-role {
+      display: block;
+      color: #17212b;
+      font-weight: 950;
+      line-height: 1.25;
+    }
+
+    .worker-company {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .worker-cert-list {
+      display: grid;
+      gap: 7px;
+    }
+
+    .worker-cert-card {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 9px;
+      border: 1px solid #ead8ad;
+      border-radius: 8px;
+      background: #fff7e6;
+    }
+
+    .worker-cert-title {
+      display: block;
+      color: #7b4a00;
+      font-size: 12px;
+      font-weight: 950;
+      line-height: 1.25;
+    }
+
+    .worker-cert-file {
+      display: block;
+      margin-top: 3px;
+      color: #8a5b0a;
+      font-size: 12px;
+      font-weight: 750;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+
+    .permit-chip-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .permit-chip {
+      min-height: 30px;
+      padding: 6px 10px;
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      background: var(--blue-soft);
+      color: #2154b0;
+      font-size: 12px;
+      font-weight: 950;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .empty-row {
+      padding: 34px 22px;
+      color: var(--muted);
+      font-weight: 800;
+    }
+
+    .fab-stack {
+      position: fixed;
+      right: 32px;
+      bottom: 30px;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .fab {
+      min-height: 58px;
+      padding: 0 22px 0 18px;
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      border: 0;
+      border-radius: 999px;
+      background: #f6c744;
+      color: #101820;
+      box-shadow: 0 18px 34px rgba(117, 90, 0, 0.26);
+      font-size: 15px;
+      font-weight: 950;
+    }
+
+    .fab:hover {
+      background: #ffd85b;
+    }
+
+    .fab.emergency {
+      background: var(--red);
+      color: #ffffff;
+      box-shadow: 0 18px 34px rgba(158, 29, 24, 0.28);
+    }
+
+    .fab.emergency:hover {
+      background: #a92721;
+    }
+
+    .fab.emergency .fab-icon {
+      background: #ffffff;
+      color: var(--red);
+    }
+
+    .fab-icon {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      background: #101820;
+      color: #ffffff;
+    }
+
+    .toast {
+      position: fixed;
+      right: 30px;
+      bottom: 100px;
+      z-index: 30;
+      max-width: 340px;
+      padding: 13px 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      color: #1d2731;
+      box-shadow: var(--shadow);
+      font-size: 14px;
+      font-weight: 800;
+      opacity: 0;
+      transform: translateY(8px);
+      pointer-events: none;
+      transition: opacity 160ms ease, transform 160ms ease;
+    }
+
+    .toast.is-visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .app-dialog {
+      width: min(820px, calc(100% - 32px));
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: 0 28px 80px rgba(16, 24, 32, 0.24);
+    }
+
+    .app-dialog.compact {
+      width: min(880px, calc(100% - 32px));
+      max-height: min(86vh, 860px);
+    }
+
+    .app-dialog::backdrop {
+      background: rgba(16, 24, 32, 0.46);
+    }
+
+    .app-dialog.is-emergency {
+      border-color: #b42318;
+      box-shadow: 0 28px 80px rgba(180, 35, 24, 0.26);
+    }
+
+    .app-dialog.is-emergency .dialog-shell {
+      background: linear-gradient(180deg, #fff5f5 0, #ffffff 132px);
+    }
+
+    .dialog-shell {
+      padding: 24px;
+    }
+
+    .app-dialog.compact .dialog-shell {
+      max-height: calc(86vh - 2px);
+      overflow-y: auto;
+      padding: 26px;
+    }
+
+    .dialog-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 22px;
+    }
+
+    .dialog-head h3 {
+      margin: 0 0 5px;
+      font-size: 24px;
+      line-height: 1.15;
+      font-weight: 900;
+    }
+
+    .dialog-head p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .app-dialog.is-emergency .dialog-head h3 {
+      color: #912018;
+    }
+
+    .app-dialog.is-emergency .dialog-head p {
+      color: #7a271a;
+    }
+
+    .app-dialog.is-emergency .icon-button {
+      border-color: #fecdca;
+      background: #fffafa;
+      color: #912018;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .form-field {
+      display: grid;
+      gap: 7px;
+    }
+
+    .form-field.full {
+      grid-column: 1 / -1;
+    }
+
+    .form-field > span,
+    .field-label {
+      color: #2e3842;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .form-field input,
+    .form-field select,
+    .form-field textarea {
+      width: 100%;
+      min-height: 42px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #ffffff;
+      color: var(--ink);
+      outline: 0;
+    }
+
+    .form-field textarea {
+      min-height: 92px;
+      resize: vertical;
+    }
+
+    .form-field input:focus,
+    .form-field select:focus,
+    .form-field textarea:focus {
+      border-color: #1f6feb;
+      box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.12);
+    }
+
+    .app-dialog.is-emergency .form-field > span,
+    .app-dialog.is-emergency .field-label {
+      color: #912018;
+    }
+
+    .app-dialog.is-emergency .form-field input,
+    .app-dialog.is-emergency .form-field select,
+    .app-dialog.is-emergency .form-field textarea {
+      border-color: #fecdca;
+      background: #fffafa;
+    }
+
+    .app-dialog.is-emergency .form-field input:focus,
+    .app-dialog.is-emergency .form-field select:focus,
+    .app-dialog.is-emergency .form-field textarea:focus {
+      border-color: #d92d20;
+      box-shadow: 0 0 0 3px rgba(217, 45, 32, 0.14);
+    }
+
+    .hazard-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px;
+    }
+
+    .hazard-options label {
+      min-height: 34px;
+      padding: 0 11px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #f9fafb;
+      color: #29343e;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .hazard-options label[hidden] {
+      display: none !important;
+    }
+
+    .hazard-options label.is-locked {
+      border-color: #b42318;
+      background: #fef3f2;
+      color: #912018;
+      cursor: not-allowed;
+    }
+
+    .hazard-options input {
+      width: 14px;
+      height: 14px;
+      margin: 0;
+      accent-color: #17212b;
+    }
+
+    .document-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .document-upload {
+      min-height: 108px;
+      padding: 14px;
+      display: grid;
+      align-content: start;
+      gap: 9px;
+      border: 1px dashed var(--line-strong);
+      border-radius: 8px;
+      background: #f9fafb;
+    }
+
+    .document-upload input {
+      min-height: auto;
+      padding: 8px;
+      background: #ffffff;
+    }
+
+    .document-upload small {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      overflow-wrap: anywhere;
+    }
+
+    .certification-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .certification-row {
+      display: grid;
+      grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) minmax(220px, 1.35fr) auto;
+      grid-template-areas:
+        "type number issuer remove"
+        "issue expiry file remove";
+      gap: 10px;
+      align-items: end;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .certification-field {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .certification-field label,
+    .certification-label {
+      color: #56616a;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .certification-field input,
+    .certification-field select {
+      width: 100%;
+      min-height: 38px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--ink);
+      background: #ffffff;
+    }
+
+    .certification-field small {
+      color: var(--muted);
+      font-size: 11px;
+      overflow-wrap: anywhere;
+    }
+
+    .certification-field--type {
+      grid-area: type;
+    }
+
+    .certification-field--number {
+      grid-area: number;
+    }
+
+    .certification-field--issuer {
+      grid-area: issuer;
+    }
+
+    .certification-field--issue {
+      grid-area: issue;
+    }
+
+    .certification-field--expiry {
+      grid-area: expiry;
+    }
+
+    .certification-field--file {
+      grid-area: file;
+    }
+
+    .certification-file-picker {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: center;
+      gap: 8px;
+      min-height: 38px;
+      padding: 5px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #ffffff;
+      cursor: pointer;
+      text-transform: none;
+    }
+
+    .certification-file-picker input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      min-height: 1px;
+      padding: 0;
+      border: 0;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .certification-file-picker span {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 28px;
+      padding: 0 10px;
+      border-radius: 5px;
+      background: #eef2f6;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .certification-file-picker small {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .certification-remove-button {
+      grid-area: remove;
+      min-width: 96px;
+      align-self: end;
+      white-space: nowrap;
+    }
+
+    .field-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .field-toolbar .dialog-button {
+      min-height: 34px;
+      padding: 0 11px;
+      font-size: 12px;
+    }
+
+    .worker-options {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .worker-option {
+      min-height: 86px;
+      padding: 12px;
+      display: grid;
+      grid-template-columns: 18px 1fr;
+      gap: 10px;
+      align-items: start;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      color: #23303a;
+    }
+
+    .worker-option.is-disabled {
+      background: #f7f9fb;
+      color: #7b8792;
+      opacity: 0.72;
+    }
+
+    .worker-option input {
+      width: 15px;
+      height: 15px;
+      margin-top: 3px;
+      accent-color: #17212b;
+    }
+
+    .worker-option strong,
+    .worker-option span {
+      display: block;
+    }
+
+    .worker-option strong {
+      margin-bottom: 3px;
+      font-size: 14px;
+      font-weight: 900;
+    }
+
+    .worker-option span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+      font-weight: 750;
+    }
+
+    .worker-option small {
+      display: inline-block;
+      margin-top: 8px;
+      color: var(--green);
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .worker-option.is-disabled small {
+      color: var(--red);
+    }
+
+    .dialog-actions {
+      margin-top: 22px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .dialog-button {
+      min-height: 42px;
+      padding: 0 15px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #ffffff;
+      color: #26313b;
+      font-weight: 900;
+    }
+
+    .dialog-button.primary {
+      border-color: #17212b;
+      background: #17212b;
+      color: #ffffff;
+    }
+
+    .dialog-button.warning {
+      border-color: #f6c744;
+      background: #f6c744;
+      color: #101820;
+    }
+
+    .detail-list {
+      margin: 0;
+      display: grid;
+      gap: 18px;
+    }
+
+    .detail-hero {
+      padding: 18px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+    }
+
+    .detail-hero strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 24px;
+      line-height: 1.15;
+      font-weight: 950;
+    }
+
+    .detail-hero p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-weight: 750;
+    }
+
+    .detail-kicker {
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 950;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .detail-section {
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+    }
+
+    .detail-section h4 {
+      margin: 0 0 14px;
+      font-size: 13px;
+      font-weight: 950;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #344150;
+    }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .detail-item {
+      min-width: 0;
+      padding: 13px 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .detail-item.wide {
+      grid-column: 1 / -1;
+    }
+
+    .detail-item > div {
+      display: grid;
+      gap: 7px;
+      align-items: start;
+    }
+
+    .detail-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .detail-value {
+      color: #17212b;
+      font-weight: 750;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+
+    .detail-text {
+      color: #17212b;
+      font-weight: 750;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+
+    .detail-chip-list,
+    .detail-documents {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .detail-chip {
+      max-width: 100%;
+      min-height: 30px;
+      padding: 6px 9px;
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid #d7e2ec;
+      border-radius: 6px;
+      background: #f7fafc;
+      color: #26313d;
+      font-size: 12px;
+      font-weight: 850;
+      overflow-wrap: anywhere;
+    }
+
+    .detail-document {
+      width: 100%;
+      padding: 10px 11px;
+      display: grid;
+      gap: 4px;
+      border: 1px solid #d7e2ec;
+      border-radius: 8px;
+      background: #f8fafc;
+    }
+
+    .detail-document strong {
+      color: #26313d;
+      font-size: 12px;
+      font-weight: 950;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .detail-document span {
+      color: #17212b;
+      font-size: 13px;
+      font-weight: 750;
+      overflow-wrap: anywhere;
+    }
+
+    .audit-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .audit-item {
+      padding: 9px 10px;
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 10px;
+      border-radius: 6px;
+      background: #f8fafc;
+    }
+
+    .audit-item time {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .audit-item span {
+      color: #17212b;
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    @media (max-width: 1180px) {
+      .summary-grid {
+        grid-template-columns: repeat(2, minmax(220px, 1fr));
+      }
+
+      .content-grid {
+        grid-template-columns: 1fr;
+      }
+
+    }
+
+    @media (max-width: 900px) {
+      .app-shell {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        min-height: auto;
+        padding: 18px;
+      }
+
+      .side-nav,
+      .side-foot {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .main {
+        grid-template-rows: auto 1fr;
+      }
+
+      .topbar {
+        position: static;
+        height: auto;
+        padding: 16px 18px;
+        display: grid;
+      }
+
+      .search {
+        width: 100%;
+      }
+
+      .topbar-actions {
+        justify-content: space-between;
+      }
+
+      .workspace {
+        padding: 28px 18px 112px;
+      }
+    }
+
+    @media (max-width: 680px) {
+      .page-head,
+      .panel-head {
+        display: grid;
+      }
+
+      .page-head h2 {
+        font-size: 28px;
+      }
+
+      .summary-grid,
+      .side-nav,
+      .side-foot {
+        grid-template-columns: 1fr;
+      }
+
+      .profile span,
+      .profile strong {
+        display: none;
+      }
+
+      .profile {
+        grid-template-columns: 40px;
+      }
+
+      .table-toolbar {
+        align-items: stretch;
+        display: grid;
+      }
+
+      .form-grid,
+      .detail-grid,
+      .worker-options,
+      .certification-row {
+        grid-template-columns: 1fr;
+      }
+
+      .detail-hero,
+      .audit-item {
+        grid-template-columns: 1fr;
+      }
+
+      .detail-hero {
+        display: grid;
+      }
+
+      .certification-row {
+        grid-template-areas:
+          "type"
+          "number"
+          "issuer"
+          "issue"
+          "expiry"
+          "file"
+          "remove";
+      }
+
+      .dialog-actions {
+        display: grid;
+      }
+
+      .field-toolbar {
+        display: grid;
+      }
+
+      .dialog-button {
+        width: 100%;
+      }
+
+      .filter-button {
+        justify-content: center;
+      }
+
+      .fab-stack {
+        left: 18px;
+        right: 18px;
+        display: grid;
+      }
+
+      .fab {
+        width: 100%;
+        justify-content: center;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Requester navigation">
+      <div class="brand">
+        <div class="brand-mark">PTW</div>
+        <div>
+          <h1>PTW Guardian</h1>
+          <p>Safety Ops</p>
+        </div>
+      </div>
+
+      <nav class="side-nav">
+        <button class="nav-item is-active" type="button" data-view="dashboard">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="3" y="3" width="7" height="7" />
+            <rect x="14" y="3" width="7" height="7" />
+            <rect x="3" y="14" width="7" height="7" />
+            <rect x="14" y="14" width="7" height="7" />
+          </svg>
+          <span>Dashboard</span>
+        </button>
+        <button class="nav-item" type="button" data-view="permits">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 2h9l5 5v15H6z" />
+            <path d="M14 2v6h6" />
+            <path d="M9 13h6M9 17h4" />
+          </svg>
+          <span>My Permits</span>
+        </button>
+        <button class="nav-item" type="button" data-view="compliance">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+            <path d="m9 12 2 2 4-5" />
+          </svg>
+          <span>Compliance</span>
+        </button>
+        <button class="nav-item" type="button" data-view="workers">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+          </svg>
+          <span>Workers</span>
+        </button>
+      </nav>
+
+      <div class="side-foot">
+        <button class="nav-item" type="button" onclick="window.location.href='/account'">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" />
+            <path d="M4 21a8 8 0 0 1 16 0" />
+          </svg>
+          <span>Account</span>
+        </button>
+        <button class="nav-item" type="button" onclick="window.location.href='/support'">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M9.1 9a3 3 0 1 1 5.6 1.5c-.9.7-1.7 1.2-1.7 2.5" />
+            <path d="M12 17h.01" />
+          </svg>
+          <span>Support</span>
+        </button>
+        <button class="nav-item" type="button" id="logoutButton">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M10 17l5-5-5-5" />
+            <path d="M15 12H3" />
+            <path d="M21 3v18h-8" />
+          </svg>
+          <span>Logout</span>
+        </button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <label class="search">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-3.5-3.5" />
+          </svg>
+          <input id="permitSearch" type="search" placeholder="Search permit ID, work type, or location" />
+        </label>
+
+        <div class="topbar-actions">
+          <div class="notification-wrap">
+          <button class="icon-button" type="button" id="notificationButton" aria-label="Open notifications" aria-expanded="false" aria-controls="notificationPanel">
+            <span class="alert-dot" id="notificationDot" hidden></span>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 7h18s-3 0-3-7" />
+              <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+            </svg>
+          </button>
+          <div class="notification-panel" id="notificationPanel" hidden>
+            <div class="notification-head">
+              <div>
+                <strong>Notifications</strong>
+                <span id="notificationCount">0 items</span>
+              </div>
+              <button class="link-button" type="button" id="notificationCloseButton">Close</button>
+            </div>
+            <div class="notification-list" id="notificationList"></div>
+          </div>
+          </div>
+          <button class="icon-button" type="button" aria-label="Refresh dashboard" id="refreshButton">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+              <path d="M21 3v5h-5" />
+              <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+              <path d="M3 21v-5h5" />
+            </svg>
+          </button>
+          <button class="profile" type="button" id="accountButton" aria-label="Open account settings">
+            <span>
+              <strong id="profileName">Rina Requester</strong>
+              <span id="profileRole">Permit Requester</span>
+            </span>
+            <div class="avatar" id="profileAvatar">RR</div>
+          </button>
+        </div>
+      </header>
+
+      <section class="workspace">
+        <div class="page-head">
+          <div>
+            <span class="eyebrow">Requester Dashboard</span>
+            <h2>Permit request control center</h2>
+            <p>
+              Track draft permits, approval queues, active work, and rejected requests from one
+              safety-focused workspace.
+            </p>
+          </div>
+          <div class="date-chip">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="18" rx="2" />
+              <path d="M16 2v4M8 2v4M3 10h18" />
+            </svg>
+            <span id="currentDateLabel">Today, Jun 3, 2026</span>
+          </div>
+        </div>
+
+        <section class="summary-grid" aria-label="Permit summary">
+          <article class="summary-card">
+            <div class="summary-top">
+              <div>
+                <span>Drafts</span>
+                <strong data-count="draft">6</strong>
+              </div>
+              <div class="summary-icon draft">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                </svg>
+              </div>
+            </div>
+            <div class="summary-note"><i></i><span id="draftNote">Local and saved drafts</span></div>
+          </article>
+
+          <article class="summary-card">
+            <div class="summary-top">
+              <div>
+                <span>Pending Approval</span>
+                <strong data-count="pending">8</strong>
+              </div>
+              <div class="summary-icon pending">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 6v6l4 2" />
+                </svg>
+              </div>
+            </div>
+            <div class="summary-note"><i></i><span id="pendingNote">Awaiting approval workflow</span></div>
+          </article>
+
+          <article class="summary-card">
+            <div class="summary-top">
+              <div>
+                <span>Active</span>
+                <strong data-count="active">12</strong>
+              </div>
+              <div class="summary-icon active">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M22 11.1V12a10 10 0 1 1-5.9-9.1" />
+                  <path d="m22 4-10 10.01-3-3" />
+                </svg>
+              </div>
+            </div>
+            <div class="summary-note"><i></i><span id="activeNote">Approved or active work</span></div>
+          </article>
+
+          <article class="summary-card">
+            <div class="summary-top">
+              <div>
+                <span>Rejected</span>
+                <strong data-count="rejected">3</strong>
+              </div>
+              <div class="summary-icon rejected">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="m15 9-6 6M9 9l6 6" />
+                </svg>
+              </div>
+            </div>
+            <div class="summary-note"><i></i><span id="rejectedNote">Requires requester revision</span></div>
+          </article>
+        </section>
+
+        <div class="content-grid">
+          <section class="panel" aria-labelledby="recentRequestsTitle">
+            <div class="panel-head">
+              <h3 id="recentRequestsTitle">Recent Permit Requests</h3>
+              <div class="table-toolbar">
+                <button class="filter-button" type="button" data-status-filter="all">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M3 6h18M7 12h10M10 18h4" />
+                  </svg>
+                  All statuses
+                </button>
+                <button class="filter-button" type="button" data-status-filter="pending">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 6v6l3 2" />
+                  </svg>
+                  Pending
+                </button>
+                <button class="filter-button" type="button" data-status-filter="draft">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                  </svg>
+                  Drafts
+                </button>
+                <button class="filter-button" type="button" data-status-filter="active">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m20 6-11 11-5-5" />
+                  </svg>
+                  Active
+                </button>
+                <button class="filter-button" type="button" data-status-filter="rejected">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m15 9-6 6M9 9l6 6" />
+                  </svg>
+                  Rejected
+                </button>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead id="permitTableHead">
+                  <tr>
+                    <th>Permit ID</th>
+                    <th>Work Type</th>
+                    <th>Location</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="permitTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="fab-stack" aria-label="Permit actions">
+    <button class="fab emergency" type="button" id="emergencyPermitButton" aria-label="Create Emergency Permit">
+      <span class="fab-icon">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m12 3 10 18H2L12 3Z" />
+          <path d="M12 9v5M12 17h.01" />
+        </svg>
+      </span>
+      <span>Emergency Permit</span>
+    </button>
+
+    <button class="fab" type="button" id="createPermitButton" aria-label="Create New Permit">
+      <span class="fab-icon">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+      </span>
+      <span>Create New Permit</span>
+    </button>
+  </div>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <dialog class="app-dialog" id="permitDialog">
+    <form class="dialog-shell" id="permitForm">
+      <div class="dialog-head">
+        <div>
+          <h3 id="permitDialogTitle">Create Permit Request</h3>
+          <p id="permitDialogSubtitle">Save as draft or submit to the approval queue.</p>
+        </div>
+        <button class="icon-button" type="button" data-dialog-close="permitDialog" aria-label="Close permit form">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <input type="hidden" name="id" />
+
+      <div class="form-grid">
+        <label class="form-field">
+          <span>Permit Title</span>
+          <input name="title" type="text" placeholder="e.g. Pump skid hot work" required />
+        </label>
+
+        <label class="form-field">
+          <span>Work Type</span>
+          <select name="workType" required>
+            <option value="Hot Work">Hot Work</option>
+            <option value="Confined Space">Confined Space</option>
+            <option value="Electrical Isolation">Electrical Isolation</option>
+            <option value="Work at Height">Work at Height</option>
+            <option value="Line Breaking">Line Breaking</option>
+            <option value="General Maintenance">General Maintenance</option>
+          </select>
+        </label>
+
+        <label class="form-field full">
+          <span>Location</span>
+          <input name="location" type="text" placeholder="e.g. Main Plant Alpha - Sector 4" required />
+        </label>
+
+        <label class="form-field">
+          <span>Start Date & Time</span>
+          <input name="startDateTime" type="datetime-local" required />
+        </label>
+
+        <label class="form-field">
+          <span>End Date & Time</span>
+          <input name="endDateTime" type="datetime-local" required />
+        </label>
+
+        <label class="form-field full">
+          <span>Scope / Description</span>
+          <textarea name="description" placeholder="Describe the work scope, boundary, and method." required></textarea>
+        </label>
+
+        <div class="form-field full">
+          <span class="field-label">Hazards</span>
+          <div class="hazard-options">
+            <label><input name="hazards" type="checkbox" value="Hot Work" /> Hot Work</label>
+            <label><input name="hazards" type="checkbox" value="Confined Space" /> Confined Space</label>
+            <label><input name="hazards" type="checkbox" value="Working at Height" /> Working at Height</label>
+            <label><input name="hazards" type="checkbox" value="Electrical" /> Electrical</label>
+            <label><input name="hazards" type="checkbox" value="Chemical Handling" /> Chemical Handling</label>
+            <label data-emergency-hazard-option hidden><input name="hazards" type="checkbox" value="Emergency" /> Emergency</label>
+          </div>
+        </div>
+
+        <div class="form-field full">
+          <span class="field-label">Required Documents</span>
+          <div class="document-grid" id="documentGrid"></div>
+        </div>
+
+        <div class="form-field full">
+          <div class="field-toolbar">
+            <span class="field-label">Assign Competent Worker</span>
+          </div>
+          <div class="worker-options" id="workerOptions" aria-live="polite"></div>
+        </div>
+
+        <label class="form-field full">
+          <span>Control Measures</span>
+          <textarea name="controls" placeholder="One control per line, e.g. Fire watch assigned"></textarea>
+        </label>
+
+        <label class="form-field">
+          <span>PPE</span>
+          <input name="ppe" type="text" placeholder="Gloves, face shield, harness" />
+        </label>
+
+        <label class="form-field">
+          <span>Approvers</span>
+          <select name="approvers" required>
+            <option value="">Select supervisor</option>
+            <option value="Sam Supervisor">Sam Supervisor</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="dialog-actions">
+        <button class="dialog-button" type="button" data-dialog-close="permitDialog">Cancel</button>
+        <button class="dialog-button warning" type="submit" id="submitPermitButton">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m22 2-7 20-4-9-9-4Z" />
+            <path d="M22 2 11 13" />
+          </svg>
+          <span data-submit-label>Send to Admin Review</span>
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="app-dialog compact" id="permitDetailDialog">
+    <div class="dialog-shell">
+      <div class="dialog-head">
+        <div>
+          <h3 id="detailTitle">Permit Details</h3>
+          <p id="detailSubtitle">Requester permit information and latest status.</p>
+        </div>
+        <button class="icon-button" type="button" data-dialog-close="permitDetailDialog" aria-label="Close permit details">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div class="detail-list" id="detailList"></div>
+      <div class="dialog-actions">
+        <button class="dialog-button primary" type="button" data-dialog-close="permitDetailDialog">Close</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="app-dialog" id="workerDialog">
+    <form class="dialog-shell" id="workerForm">
+      <div class="dialog-head">
+        <div>
+          <h3 id="workerDialogTitle">Worker Profile</h3>
+          <p id="workerDialogSubtitle">Link an existing worker account, then submit competency details to Admin Lane 2 review.</p>
+        </div>
+        <button class="icon-button" type="button" data-dialog-close="workerDialog" aria-label="Close worker profile">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <input type="hidden" name="id" />
+
+      <div class="form-grid">
+        <label class="form-field">
+          <span>Full Name</span>
+          <input name="name" type="text" placeholder="e.g. Ali Hassan" required />
+        </label>
+        <label class="form-field">
+          <span>IC / Passport No.</span>
+          <input name="icPassport" type="text" placeholder="e.g. A12345678" required />
+        </label>
+        <label class="form-field">
+          <span>Worker ID</span>
+          <input name="employeeId" type="text" placeholder="From registered account" disabled />
+        </label>
+        <label class="form-field">
+          <span>Phone Number</span>
+          <input name="phone" type="tel" placeholder="+60 12-345 6789" />
+        </label>
+        <label class="form-field">
+          <span>Email</span>
+          <input name="email" type="email" placeholder="Must match registered worker account" required />
+        </label>
+        <label class="form-field">
+          <span>Company / Contractor</span>
+          <input name="company" type="text" placeholder="ABC Contractor" />
+        </label>
+        <label class="form-field">
+          <span>Position</span>
+          <select name="role" id="workerRoleSelect"></select>
+        </label>
+        <div class="form-field full">
+          <span class="field-label">Permit Types</span>
+          <div class="hazard-options" id="workerPermitTypes"></div>
+        </div>
+        <div class="form-field full">
+          <div class="field-toolbar">
+            <span class="field-label">Certifications</span>
+            <button class="dialog-button" id="addWorkerCertificationButton" type="button">Add Certification</button>
+          </div>
+          <div class="certification-list" id="workerCertificationList"></div>
+        </div>
+      </div>
+
+      <div class="dialog-actions">
+        <button class="dialog-button" type="button" data-dialog-close="workerDialog">Cancel</button>
+        <button class="dialog-button warning" type="submit">Submit for Admin Review</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/requester-dashboard.js?v=15"></script>
+</body>
+</html>
