@@ -10,7 +10,7 @@
   --success: #087443;
   --danger: #b42318;
   --shadow: 0 14px 34px rgba(16, 24, 32, 0.08);
-  font-family: Inter, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  font-family: Roboto, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
 }
 
 * {
@@ -213,6 +213,84 @@ a {
   white-space: pre-line;
 }
 
+.role-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.role-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.role-card {
+  min-height: 74px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--ink);
+  text-align: left;
+}
+
+.role-card:hover,
+.role-card:focus-visible {
+  outline: none;
+  border-color: var(--line-strong);
+  background: #f8fafc;
+}
+
+.role-card.is-active {
+  border-color: #9bd4b9;
+  background: #eefaf4;
+}
+
+.role-card span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.role-card strong,
+.role-card small {
+  overflow-wrap: anywhere;
+}
+
+.role-card strong {
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.role-card small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.role-card em {
+  flex: 0 0 auto;
+  min-width: 58px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #eef3f6;
+  color: #4b5965;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.role-card.is-active em {
+  background: #d8f1e4;
+  color: var(--success);
+}
+
 .hidden {
   display: none !important;
 }
@@ -295,7 +373,8 @@ a {
 
   .account-topbar,
   .account-grid,
-  .form-grid {
+  .form-grid,
+  .role-list {
     grid-template-columns: 1fr;
   }
 

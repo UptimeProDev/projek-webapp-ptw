@@ -2,8 +2,10 @@ const shell = document.querySelector(".auth-shell");
 const signupForm = document.querySelector("#signupForm");
 const loginForm = document.querySelector("#loginForm");
 const sessionPanel = document.querySelector("#sessionPanel");
+const sessionTitle = sessionPanel?.querySelector("h2");
 const sessionSummary = document.querySelector("#sessionSummary");
 const sessionDetails = document.querySelector("#sessionDetails");
+const roleSelection = document.querySelector("#roleSelection");
 const signupMessage = document.querySelector("#signupMessage");
 const loginMessage = document.querySelector("#loginMessage");
 const signupPassword = document.querySelector("#signupPassword");
@@ -26,6 +28,8 @@ const roleLabels = {
   admin: "Admin",
   worker: "Contractor / Worker",
 };
+
+const rolePriority = ["admin", "safety_officer", "supervisor", "requester", "worker"];
 
 function isStaticHtmlPage() {
   return location.protocol === "file:" || /\.html$/i.test(location.pathname);
@@ -52,12 +56,22 @@ function getAppUrl(page) {
   return `/${page}`;
 }
 
+function getRoleDestination(role) {
+  if (role === "requester") return getAppUrl("dashboard");
+  if (role === "admin") return getAppUrl("admin");
+  if (role === "safety_officer") return getAppUrl("safety");
+  if (role === "supervisor") return getAppUrl("review");
+  if (role === "worker") return getAppUrl("worker");
+  return "";
+}
+
 function setMode(mode) {
   shell.dataset.mode = mode;
   modeToggle?.classList.remove("is-hidden");
   signupForm.classList.toggle("is-hidden", mode !== "signup");
   loginForm.classList.toggle("is-hidden", mode !== "login");
   sessionPanel.classList.add("is-hidden");
+  if (roleSelection) roleSelection.innerHTML = "";
   signupMessage.textContent = "";
   loginMessage.textContent = "";
   signupMessage.classList.remove("success");
@@ -156,6 +170,11 @@ function saveSession(payload, remember) {
   storage.setItem("ptwSession", serialized);
 }
 
+function writeSession(payload) {
+  const storage = localStorage.getItem("ptwSession") ? localStorage : sessionStorage;
+  storage.setItem("ptwSession", JSON.stringify(payload));
+}
+
 function readSession() {
   const stored =
     localStorage.getItem("ptwSession") || sessionStorage.getItem("ptwSession");
@@ -194,42 +213,97 @@ function renderSession(user) {
   loginForm.classList.add("is-hidden");
   sessionPanel.classList.remove("is-hidden");
 
+  if (sessionTitle) sessionTitle.textContent = "Access Granted";
+  if (roleSelection) roleSelection.innerHTML = "";
   sessionSummary.textContent = `${user.fullName} is signed in to PTW Guardian.`;
   sessionDetails.replaceChildren();
   appendDetail("Employee ID", user.employeeId);
-  appendDetail("Role", roleLabels[user.role] || user.role);
+  appendDetail("Role", getUserRoles(user).map((role) => roleLabels[role] || role).join(", "));
   appendDetail("Email", user.email);
   appendDetail("Organization", user.organization);
 }
 
-function redirectToDashboard(payload) {
-  const role = String(payload?.user?.role || "").trim().toLowerCase();
+function getUserRoles(user) {
+  const roles = Array.isArray(user?.roles) ? user.roles : [user?.role];
+  return roles
+    .map((role) => String(role || "").trim().toLowerCase())
+    .map((role) => role === "approver" ? "supervisor" : role)
+    .filter(Boolean)
+    .filter((role, index, list) => list.indexOf(role) === index)
+    .sort((a, b) => {
+      const aIndex = rolePriority.indexOf(a);
+      const bIndex = rolePriority.indexOf(b);
+      return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
+    });
+}
 
-  if (role === "requester") {
-    window.location.href = getAppUrl("dashboard");
+function getPreferredRole(user) {
+  const roles = getUserRoles(user);
+  return rolePriority.find((role) => roles.includes(role)) || "";
+}
+
+function setActiveRoleAndRedirect(role) {
+  const session = readSession();
+  if (session?.user && getUserRoles(session.user).includes(role)) {
+    writeSession({ ...session, activeRole: role });
+  }
+
+  const destination = getRoleDestination(role);
+  if (destination) {
+    window.location.href = destination;
     return true;
   }
 
-  if (["admin", "safety_officer"].includes(role)) {
-    window.location.href = getAppUrl(role === "safety_officer" ? "safety" : "admin");
+  return false;
+}
+
+function getRoleDescription(role) {
+  if (role === "admin") return "Worker review, user roles, draft routing";
+  if (role === "safety_officer") return "MOS Approval and safety review";
+  if (role === "supervisor") return "Permit Approval and work release";
+  if (role === "requester") return "Create and monitor permit requests";
+  if (role === "worker") return "Assigned work and closure actions";
+  return "Open dashboard";
+}
+
+function renderRoleSelection(user) {
+  const roles = getUserRoles(user);
+  modeToggle?.classList.add("is-hidden");
+  signupForm.classList.add("is-hidden");
+  loginForm.classList.add("is-hidden");
+  sessionPanel.classList.remove("is-hidden");
+  if (sessionTitle) sessionTitle.textContent = "Select Role";
+  sessionSummary.textContent = `${user.fullName || user.email || "User"} has multiple access roles.`;
+  sessionDetails.replaceChildren();
+  appendDetail("Employee ID", user.employeeId || "-");
+  appendDetail("Available Roles", roles.map((role) => roleLabels[role] || role).join(", "));
+  if (!roleSelection) return;
+  roleSelection.innerHTML = roles
+    .map((role) => `
+      <button class="role-option-button" type="button" data-role-choice="${role}">
+        <strong>${roleLabels[role] || role}</strong>
+        <span>${getRoleDescription(role)}</span>
+      </button>
+    `)
+    .join("");
+}
+
+function handleAuthenticatedSession(payload, remember) {
+  const roles = getUserRoles(payload?.user);
+  if (roles.length === 1) {
+    saveSession({ ...payload, activeRole: roles[0] }, remember);
+    return setActiveRoleAndRedirect(roles[0]);
+  }
+
+  if (roles.length > 1) {
+    const activeRole = roles.includes(payload?.activeRole) ? payload.activeRole : "";
+    saveSession({ ...payload, activeRole }, remember);
+    if (activeRole) return setActiveRoleAndRedirect(activeRole);
+    renderRoleSelection(payload.user);
     return true;
   }
 
-  if (role === "supervisor") {
-    window.location.href = getAppUrl("review");
-    return true;
-  }
-
-  if (role === "approver") {
-    window.location.href = getAppUrl("review");
-    return true;
-  }
-
-  if (role === "worker") {
-    window.location.href = getAppUrl("worker");
-    return true;
-  }
-
+  saveSession(payload, remember);
   return false;
 }
 
@@ -290,9 +364,8 @@ signupForm.addEventListener("submit", async (event) => {
       }),
     });
 
-    saveSession(result, true);
     setMessage(signupMessage, "Account created.", "success");
-    if (redirectToDashboard(result)) {
+    if (handleAuthenticatedSession(result, true)) {
       return;
     }
     renderSession(result.user);
@@ -319,9 +392,8 @@ loginForm.addEventListener("submit", async (event) => {
       }),
     });
 
-    saveSession(result, data.get("remember") === "on");
     setMessage(loginMessage, "Signed in.", "success");
-    if (redirectToDashboard(result)) {
+    if (handleAuthenticatedSession(result, data.get("remember") === "on")) {
       return;
     }
     renderSession(result.user);
@@ -356,13 +428,15 @@ document.addEventListener("DOMContentLoaded", () => {
   const isAuthRoute = location.pathname === "/login" || location.pathname === "/signup";
 
   if (existingSession && existingSession.user) {
-    if (redirectToDashboard(existingSession)) {
+    const roles = getUserRoles(existingSession.user);
+    const activeRole = roles.includes(existingSession.activeRole) ? existingSession.activeRole : "";
+    if (roles.length > 1 && !activeRole) {
+      renderRoleSelection(existingSession.user);
       return;
     }
-    if (!isAuthRoute) {
-      renderSession(existingSession.user);
-      return;
-    }
+    if (activeRole && setActiveRoleAndRedirect(activeRole)) return;
+    if (roles.length === 1 && setActiveRoleAndRedirect(roles[0])) return;
+    if (!isAuthRoute) renderSession(existingSession.user);
   }
 
   setMode(getInitialMode());
@@ -374,6 +448,12 @@ document.querySelectorAll("[data-switch]").forEach((button) => {
     history.replaceState(null, "", getAuthUrl(mode));
     setMode(mode);
   });
+});
+
+roleSelection?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-role-choice]");
+  if (!button) return;
+  setActiveRoleAndRedirect(button.dataset.roleChoice);
 });
 
 signupPassword.addEventListener("input", updatePasswordMeter);

@@ -4,7 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Account | PTW Guardian</title>
-  <link rel="stylesheet" href="/account.css?v=1" />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/account.css?v=3" />
 </head>
 <body>
   <main class="account-shell">
@@ -39,6 +40,16 @@
           <p class="hint">JPG, PNG, or WebP. Maximum 10 MB.</p>
         </form>
       </aside>
+
+      <section class="form-panel">
+        <div class="section-head">
+          <h2>Roles</h2>
+          <p>Open the dashboard you need for this session.</p>
+        </div>
+        <div class="role-panel" id="rolePanel">
+          <div class="role-list" id="roleList"></div>
+        </div>
+      </section>
 
       <section class="form-panel">
         <div class="section-head">
@@ -109,6 +120,7 @@
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </main>
 
-  <script src="/account.js?v=1"></script>
+  <script src="/role-switcher.js?v=3"></script>
+  <script src="/account.js?v=4"></script>
 </body>
 </html>

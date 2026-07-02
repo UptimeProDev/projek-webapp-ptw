@@ -1,4 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
+  const SITE_VALIDATION_STORAGE_KEY = 'ptwSafetySiteValidationChecklists';
+
   const elements = {
     navItems: Array.from(document.querySelectorAll('.nav-item')),
     pageTitle: document.querySelector('#pageTitle'),
@@ -27,6 +29,8 @@ document.addEventListener('DOMContentLoaded', () => {
     searchInput: document.querySelector('#searchInput'),
     queueItems: document.querySelector('#queueItems'),
     permitDetail: document.querySelector('#permitDetail'),
+    siteChecklistDialog: document.querySelector('#siteChecklistDialog'),
+    siteChecklistDialogContent: document.querySelector('#siteChecklistDialogContent'),
     auditBody: document.querySelector('#auditBody'),
     auditCount: document.querySelector('#auditCount'),
   };
@@ -39,6 +43,36 @@ document.addEventListener('DOMContentLoaded', () => {
     notifications: [],
     activeView: 'all',
     selectedPermitId: null,
+    siteValidationChecklists: readStoredObject(SITE_VALIDATION_STORAGE_KEY),
+  };
+
+  const digitalDocumentLabels = {
+    MOS: {
+      title: 'MOS Digital Form',
+      fields: {
+        workTitle: 'Work Title',
+        workLocation: 'Work Location',
+        scope: 'Scope of Work',
+        methodSteps: 'Method Steps',
+        toolsEquipment: 'Tools / Equipment',
+        materials: 'Materials / Chemicals',
+        isolations: 'Isolation / Preparation',
+        responsiblePerson: 'Responsible Person',
+        emergencyArrangement: 'Emergency Arrangement',
+      },
+    },
+    JSA: {
+      title: 'JSA Digital Form',
+      fields: {
+        taskStep: 'Task Step / Activity',
+        permitTypeHazards: 'Permit Type / Hazard',
+        potentialConsequence: 'Potential Consequence',
+        controlMeasures: 'Control Measures',
+        requiredPpe: 'Required PPE',
+        responsiblePerson: 'Responsible Person',
+        residualRisk: 'Residual Risk',
+      },
+    },
   };
 
   const viewCopy = {
@@ -49,22 +83,22 @@ document.addEventListener('DOMContentLoaded', () => {
       hint: 'Select any permit to inspect requester details and complete the current safety stage.',
     },
     stage1: {
-      title: 'Stage 1 MOS Approval',
-      subtitle: 'Review methodology, HIRARC/JSA, RAMS/SWP, ERP, hazards, controls, PPE, and competency evidence.',
-      queue: 'Stage 1 Review Queue',
-      hint: 'Normal permits submitted by Admin and waiting for Safety Officer Stage 1 approval.',
+      title: 'MOS Approval',
+      subtitle: 'Review methodology, JSA, RAMS/SWP, ERP, permit type, controls, PPE, and competency evidence.',
+      queue: 'MOS Approval Queue',
+      hint: 'Normal permits submitted by Admin and waiting for Safety Officer MOS Approval.',
     },
     stage2: {
-      title: 'Stage 2 Site Validation',
+      title: 'Permit Approval',
       subtitle: 'Validate site readiness before sending normal permits to Supervisor final approval.',
-      queue: 'Stage 2 Validation Queue',
-      hint: 'Permits that passed Stage 1 and need site validation.',
+      queue: 'Permit Approval Queue',
+      hint: 'Permits that passed MOS Approval and need site validation.',
     },
     emergency: {
       title: 'Emergency Permit Approval',
       subtitle: 'Emergency permits come directly from Requester and are finally approved by Safety Officer.',
       queue: 'Emergency Review Queue',
-      hint: 'Review Stage 1 evidence and Stage 2 site readiness together, then approve or reject.',
+      hint: 'Review MOS Approval evidence and Permit Approval site readiness together, then approve or reject.',
     },
     audit: {
       title: 'Safety Review Log',
@@ -125,6 +159,19 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/'/g, '&#039;');
   }
 
+  function readStoredObject(key) {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(key) || '{}');
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function persistStoredObject(key, object) {
+    localStorage.setItem(key, JSON.stringify(object));
+  }
+
   function initials(name) {
     return String(name || 'SO')
       .split(/\s+/)
@@ -181,9 +228,9 @@ document.addEventListener('DOMContentLoaded', () => {
       },
       {
         view: 'stage1',
-        label: 'Stage 1',
-        title: `${stage1} Stage 1 review${stage1 === 1 ? '' : 's'}`,
-        body: 'Review methodology, HIRARC, JSA, ERP, controls, and PPE.',
+        label: 'MOS Approval',
+        title: `${stage1} MOS Approval review${stage1 === 1 ? '' : 's'}`,
+        body: 'Review methodology, JSA, ERP, controls, and PPE.',
       },
       {
         view: 'audit',
@@ -232,8 +279,17 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.notificationButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
   }
 
+  function getUserRoles(user) {
+    const roles = Array.isArray(user?.roles) ? user.roles : [user?.role];
+    return roles.map((role) => String(role || '').toLowerCase()).filter(Boolean);
+  }
+
+  function userHasRole(user, role) {
+    return getUserRoles(user).includes(role);
+  }
+
   function requireSafetyOfficer() {
-    if (state.session?.user?.role === 'safety_officer') {
+    if (userHasRole(state.session?.user, 'safety_officer')) {
       elements.warning.classList.add('hidden');
       updateProfile(state.session.user);
       return true;
@@ -252,6 +308,16 @@ document.addEventListener('DOMContentLoaded', () => {
       loadNotifications(),
     ]);
     state.permits = (permitResult.permits || permitResult.data || []).map(normalizePermit);
+    state.siteValidationChecklists = {
+      ...state.siteValidationChecklists,
+      ...state.permits.reduce((records, permit) => {
+        if (permit.siteValidation && Object.keys(permit.siteValidation).length) {
+          records[permit.id] = permit.siteValidation;
+        }
+        return records;
+      }, {}),
+    };
+    persistStoredObject(SITE_VALIDATION_STORAGE_KEY, state.siteValidationChecklists);
     state.workers = workerResult.workers || workerResult.data || [];
     state.notifications = notificationResult.notifications || notificationResult.data || [];
     renderNotifications();
@@ -288,6 +354,9 @@ document.addEventListener('DOMContentLoaded', () => {
       approvers: Array.isArray(permit.approvers) ? permit.approvers : [],
       documents: Array.isArray(permit.documents) ? permit.documents : [],
       assignedWorkers: Array.isArray(permit.assignedWorkers) ? permit.assignedWorkers : [],
+      siteValidation: permit.siteValidation && typeof permit.siteValidation === 'object' && !Array.isArray(permit.siteValidation)
+        ? permit.siteValidation
+        : {},
       status: String(permit.status || 'draft').toLowerCase(),
     };
   }
@@ -295,7 +364,24 @@ document.addEventListener('DOMContentLoaded', () => {
   function getPermitType(permit) {
     if (permit.workType) return permit.workType;
     const match = String(permit.description || '').match(/Permit Type:\s*([^\n]+)/i);
-    return match ? match[1].trim() : 'General Maintenance';
+    return match ? match[1].trim() : 'Preventive Maintenance';
+  }
+
+  function displayPermitId(permit) {
+    return permit?.permitId || permit?.id || 'Permit';
+  }
+
+  function cleanDescription(description) {
+    return String(description || '')
+      .split('\n')
+      .filter((line) => !/^Permit Class:/i.test(line.trim()))
+      .filter((line) => !/^Review Route:/i.test(line.trim()))
+      .filter((line) => !/^Permit Type:/i.test(line.trim()))
+      .filter((line) => !/^Assigned Worker/i.test(line.trim()))
+      .filter((line) => !/^Required Documents:/i.test(line.trim()))
+      .filter((line) => !/^(HIRARC|MOS|JSA):/i.test(line.trim()))
+      .join('\n')
+      .trim();
   }
 
   function getWorkflowStage(permit) {
@@ -306,8 +392,8 @@ document.addEventListener('DOMContentLoaded', () => {
       return 'Emergency Review';
     }
 
-    if (permit.status === 'submitted') return 'Stage 1 Review';
-    if (permit.status === 'stage1_complete') return 'Stage 2 Validation';
+    if (permit.status === 'submitted') return 'MOS Approval';
+    if (permit.status === 'stage1_complete') return 'Permit Approval';
     if (permit.status === 'approved') return 'Supervisor Final Approval';
     if (permit.status === 'active') return 'Active Work';
     if (permit.status === 'rejected') return 'Returned to Requester';
@@ -496,7 +582,6 @@ document.addEventListener('DOMContentLoaded', () => {
         <strong>${escapeHtml(permit.title)}</strong>
         <em class="${escapeHtml(statusClass(permit))}">${escapeHtml(getWorkflowStage(permit))}</em>
       </span>
-      <span>${escapeHtml(permit.id)}</span>
       <span>${escapeHtml(getPermitType(permit))} at ${escapeHtml(permit.location || '-')}</span>
       <span>Requester: ${escapeHtml(permit.requestedBy || '-')}</span>
       <span class="queue-meta">${escapeHtml(formatDateTime(permit.startDateTime))}</span>
@@ -523,7 +608,6 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.permitDetail.innerHTML = `
       <div class="detail-head">
         <div>
-          <span class="detail-id">${escapeHtml(permit.id)}</span>
           <h3>${escapeHtml(permit.title || 'Untitled permit')}</h3>
           <p>${escapeHtml(permit.location || '-')} - ${escapeHtml(getPermitType(permit))}</p>
         </div>
@@ -536,7 +620,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <h4>Requester Details</h4>
         <div class="detail-grid">
           ${infoBlock('Requested By', permit.requestedBy || '-')}
-          ${infoBlock('Permit Type', getPermitType(permit))}
+          ${infoBlock('Work Type', getPermitType(permit))}
           ${infoBlock('Start', formatDateTime(permit.startDateTime))}
           ${infoBlock('End', formatDateTime(permit.endDateTime))}
         </div>
@@ -546,14 +630,16 @@ document.addEventListener('DOMContentLoaded', () => {
         <h4>Work Information</h4>
         <div class="info-block wide">
           <strong>Description</strong>
-          <p>${escapeHtml(permit.description || '-')}</p>
+          <p>${escapeHtml(cleanDescription(permit.description) || '-')}</p>
         </div>
       </section>
+
+      ${renderDigitalEvidence(permit)}
 
       <section class="detail-section">
         <h4>Risk Evidence</h4>
         <div class="detail-grid">
-          ${infoBlock('Hazards', listText(permit.hazards))}
+          ${infoBlock('Permit Type', listText(permit.hazards))}
           ${infoBlock('Controls', listText(permit.controls))}
           ${infoBlock('PPE', listText(permit.ppe))}
           ${infoBlock('Approvers / Contacts', listText(permit.approvers))}
@@ -582,6 +668,38 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
 
+    elements.permitDetail.querySelector('[data-mos-jsa-export]')?.addEventListener('click', (event) => {
+      event.preventDefault();
+      downloadMosJsaExcel(permit).catch((error) => {
+        showDecisionMessage(error.error || error.message || 'Unable to export MOS/JSA Excel.', true);
+      });
+    });
+
+    elements.permitDetail.querySelectorAll('[data-digital-doc-jump]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const targetType = String(button.dataset.digitalDocJump || '').toUpperCase();
+        const card = Array.from(elements.permitDetail.querySelectorAll('[data-digital-evidence-card]')).find(
+          (item) => String(item.dataset.digitalEvidenceCard || '').toUpperCase() === targetType,
+        );
+        if (!card) {
+          showDecisionMessage('MOS/JSA digital form data is not available for this permit.', true);
+          return;
+        }
+
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        card.classList.add('is-highlighted');
+        window.setTimeout(() => card.classList.remove('is-highlighted'), 1400);
+      });
+    });
+
+    elements.permitDetail.querySelectorAll('[data-site-field]').forEach((input) => {
+      input.addEventListener('input', () => persistSiteValidationFields(permit));
+      input.addEventListener('change', () => persistSiteValidationFields(permit));
+    });
+    elements.permitDetail.querySelectorAll('[data-attendance-worker]').forEach((input) => {
+      input.addEventListener('change', () => persistSiteValidationFields(permit));
+    });
+
     elements.permitDetail.querySelectorAll('[data-action]').forEach((button) => {
       button.addEventListener('click', () => handleDecision(permit, button.dataset.action));
     });
@@ -592,13 +710,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const steps = isEmergency
       ? [
           { key: 'submitted', label: 'Requester Submit' },
-          { key: 'safety', label: 'SO Stage 1 + 2' },
+          { key: 'safety', label: 'SO MOS + Permit Approval' },
           { key: 'active', label: 'Final Approved' },
         ]
       : [
           { key: 'submitted', label: 'Admin Submit' },
-          { key: 'stage1', label: 'SO Stage 1' },
-          { key: 'stage2', label: 'SO Stage 2' },
+          { key: 'stage1', label: 'SO MOS Approval' },
+          { key: 'stage2', label: 'SO Permit Approval' },
           { key: 'supervisor', label: 'Supervisor Final' },
           { key: 'active', label: 'Work Active' },
         ];
@@ -651,33 +769,154 @@ document.addEventListener('DOMContentLoaded', () => {
     return Array.isArray(items) && items.length ? items.join('\n') : '-';
   }
 
+  function findWorkerByReference(workerId) {
+    const needle = String(workerId || '').trim().toLowerCase();
+    if (!needle) return null;
+
+    return state.workers.find((item) =>
+      [item.id, item.employeeId, item.name, item.email]
+        .filter(Boolean)
+        .map((value) => String(value).trim().toLowerCase())
+        .includes(needle),
+    ) || null;
+  }
+
+  function workerAttendanceIdentity(workerId) {
+    const worker = findWorkerByReference(workerId);
+    const id = worker?.employeeId || worker?.id || workerId;
+    const name = worker?.name || workerId;
+    const status = worker ? formatStatus(worker.status || 'valid') : 'Assigned';
+    return {
+      reference: String(workerId || '').trim(),
+      id: String(id || '').trim(),
+      name: String(name || '').trim(),
+      status,
+      label: worker ? `${id} - ${name}` : String(workerId || '').trim(),
+    };
+  }
+
   function workerText(permit) {
     if (!permit.assignedWorkers.length) return '-';
 
     return permit.assignedWorkers
       .map((workerId) => {
-        const worker = state.workers.find((item) =>
-          [item.id, item.employeeId, item.name, item.email].filter(Boolean).includes(workerId),
-        );
+        const worker = findWorkerByReference(workerId);
         if (!worker) return workerId;
         return `${worker.name} (${worker.employeeId || worker.id}) - ${formatStatus(worker.status || 'valid')}`;
       })
       .join('\n');
   }
 
+  function normalizeStructuredData(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+
+    return Object.entries(value).reduce((normalized, [key, rawValue]) => {
+      const cleanKey = String(key || '').trim();
+      if (!cleanKey) return normalized;
+
+      if (Array.isArray(rawValue)) {
+        const items = rawValue.map((item) => String(item || '').trim()).filter(Boolean);
+        if (items.length) normalized[cleanKey] = items.join('\n');
+        return normalized;
+      }
+
+      const cleanValue = String(rawValue || '').trim();
+      if (cleanValue) normalized[cleanKey] = cleanValue;
+      return normalized;
+    }, {});
+  }
+
+  function getStructuredDocument(permit, type) {
+    return (permit.documents || []).find((document) => {
+      const documentType = String(document?.type || '').trim().toUpperCase();
+      const structuredData = normalizeStructuredData(document?.structuredData);
+      return documentType === type && Object.keys(structuredData).length;
+    }) || null;
+  }
+
+  function renderDigitalEvidence(permit) {
+    const documents = ['MOS', 'JSA']
+      .map((type) => getStructuredDocument(permit, type))
+      .filter(Boolean);
+
+    if (!documents.length) return '';
+
+    return `
+      <section class="detail-section digital-evidence-section">
+        <div class="digital-evidence-title">
+          <h4>MOS / JSA Digital Evidence</h4>
+          <button class="mini-button" type="button" data-mos-jsa-export="${escapeHtml(permit.id)}">Export Excel</button>
+        </div>
+        <div class="digital-evidence-grid">
+          ${documents.map((document) => renderStructuredDocument(document)).join('')}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderStructuredDocument(document) {
+    const type = String(document.type || '').trim().toUpperCase();
+    const schema = digitalDocumentLabels[type] || { title: `${type} Digital Form`, fields: {} };
+    const data = normalizeStructuredData(document.structuredData);
+    const knownRows = Object.entries(schema.fields)
+      .map(([key, label]) => [label, data[key]])
+      .filter(([, value]) => value);
+    const extraRows = Object.entries(data)
+      .filter(([key]) => !schema.fields[key])
+      .map(([key, value]) => [formatFieldLabel(key), value]);
+    const rows = [...knownRows, ...extraRows];
+
+    return `
+      <article class="digital-evidence-card" data-digital-evidence-card="${escapeHtml(type)}">
+        <div class="digital-evidence-head">
+          <strong>${escapeHtml(schema.title)}</strong>
+          <span>${escapeHtml(document.source === 'mos-jsa-digital-form' ? 'Digital form' : document.source || 'Structured data')}</span>
+        </div>
+        <dl>
+          ${rows
+            .map(
+              ([label, value]) => `
+                <div>
+                  <dt>${escapeHtml(label)}</dt>
+                  <dd>${escapeHtml(value)}</dd>
+                </div>
+              `,
+            )
+            .join('')}
+        </dl>
+      </article>
+    `;
+  }
+
+  function formatFieldLabel(key) {
+    return String(key || '')
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/[_-]+/g, ' ')
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+
   function renderDocuments(permit) {
-    const rows = permit.documents.length
-      ? permit.documents
+    const visibleDocuments = (permit.documents || []).filter((document) => {
+      const type = String(document?.type || '').trim().toUpperCase();
+      return Boolean(document?.hasAttachment || getStructuredDocument(permit, type));
+    });
+
+    const rows = visibleDocuments.length
+      ? visibleDocuments
           .map((document) => {
+            const type = String(document.type || '').trim().toUpperCase();
+            const hasStructuredData = Boolean(getStructuredDocument(permit, type));
             const canDownload = document.id && document.hasAttachment;
             return `
               <li>
                 <div>
                   <strong>${escapeHtml(document.type || 'Document')}</strong>
-                  <span>${escapeHtml(document.name || document.fileName || '-')}</span>
+                  <span>${escapeHtml(hasStructuredData ? 'Digital form' : document.name || document.fileName || '-')}</span>
                 </div>
                 ${
-                  canDownload
+                  hasStructuredData
+                    ? `<button class="mini-button" type="button" data-digital-doc-jump="${escapeHtml(type)}">View form</button>`
+                    : canDownload
                     ? `<button class="mini-button" type="button" data-download-document="${escapeHtml(document.id)}">View</button>`
                     : '<em>No file</em>'
                 }
@@ -685,7 +924,7 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
           })
           .join('')
-      : '<li><div><strong>No documents</strong><span>Requester has not attached documents.</span></div></li>';
+      : '<li><div><strong>No supporting files</strong><span>MOS/JSA digital forms are shown in Digital Evidence.</span></div></li>';
 
     return `
       <div class="info-block document-block">
@@ -699,50 +938,465 @@ document.addEventListener('DOMContentLoaded', () => {
     return permit.isEmergency || permit.status === 'stage1_complete';
   }
 
+  function defaultSiteValidationFields(permit) {
+    return {
+      actualWorkDate: formatDateOnly(permit.startDateTime),
+      location: permit.location || '',
+      attendance: {},
+    };
+  }
+
+  function getSiteValidationRecord(permit) {
+    return state.siteValidationChecklists?.[permit.id] || permit.siteValidation || {};
+  }
+
+  function getSiteValidationFields(permit) {
+    return {
+      ...defaultSiteValidationFields(permit),
+      ...(getSiteValidationRecord(permit)._siteFields || {}),
+    };
+  }
+
+  function readSiteValidationFieldsFromDom(permit) {
+    const defaults = getSiteValidationFields(permit);
+    const actualWorkDateInput = elements.permitDetail.querySelector('[data-site-field="actualWorkDate"]');
+    const locationInput = elements.permitDetail.querySelector('[data-site-field="location"]');
+    const attendance = {};
+    elements.permitDetail.querySelectorAll('[data-attendance-worker]').forEach((input) => {
+      attendance[input.dataset.attendanceWorker] = Boolean(input.checked);
+    });
+    return {
+      actualWorkDate: actualWorkDateInput ? actualWorkDateInput.value.trim() : defaults.actualWorkDate,
+      location: locationInput ? locationInput.value.trim() : defaults.location,
+      attendance: Object.keys(attendance).length ? attendance : defaults.attendance,
+    };
+  }
+
+  function persistSiteValidationFields(permit, fields = readSiteValidationFieldsFromDom(permit)) {
+    state.siteValidationChecklists[permit.id] = {
+      ...(state.siteValidationChecklists[permit.id] || {}),
+      _siteFields: {
+        actualWorkDate: fields.actualWorkDate,
+        location: fields.location,
+        attendance: fields.attendance,
+        updatedAt: new Date().toISOString(),
+      },
+    };
+    updatePermitSiteValidationState(permit.id, state.siteValidationChecklists[permit.id]);
+    persistStoredObject(SITE_VALIDATION_STORAGE_KEY, state.siteValidationChecklists);
+  }
+
+  function updatePermitSiteValidationState(permitId, siteValidation) {
+    state.permits = state.permits.map((permit) =>
+      permit.id === permitId ? { ...permit, siteValidation } : permit,
+    );
+    if (state.selectedPermitId === permitId) {
+      const selectedPermit = state.permits.find((permit) => permit.id === permitId);
+      if (selectedPermit) state.selectedPermitId = selectedPermit.id;
+    }
+  }
+
+  async function saveSiteValidationToServer(permit, siteValidation = state.siteValidationChecklists[permit.id] || {}) {
+    const result = await apiRequest(`/api/permits/${encodeURIComponent(permit.id)}/site-validation`, {
+      method: 'PATCH',
+      body: JSON.stringify({ siteValidation }),
+    });
+    const normalizedPermit = normalizePermit(result.permit || { ...permit, siteValidation: result.siteValidation || siteValidation });
+    state.siteValidationChecklists[permit.id] = normalizedPermit.siteValidation || result.siteValidation || siteValidation;
+    updatePermitSiteValidationState(permit.id, state.siteValidationChecklists[permit.id]);
+    persistStoredObject(SITE_VALIDATION_STORAGE_KEY, state.siteValidationChecklists);
+    return normalizedPermit;
+  }
+
   function renderSiteValidation(permit) {
+    const checklists = getSiteValidationChecklists(permit);
+    const completedCount = checklists.filter((checklist) => isSiteChecklistComplete(permit.id, checklist)).length;
+    const siteFields = getSiteValidationFields(permit);
     return `
       <section class="detail-section site-panel" id="siteValidationPanel">
-        <h4>Stage 2 Site Validation</h4>
+        <h4>Permit Approval Site Validation</h4>
         <div class="site-grid">
           <label>
             <span>Actual work date</span>
-            <input data-site-field="actualWorkDate" type="date" value="${escapeHtml(formatDateOnly(permit.startDateTime))}">
+            <input data-site-field="actualWorkDate" type="date" value="${escapeHtml(siteFields.actualWorkDate)}" required>
           </label>
           <label>
             <span>Actual location</span>
-            <input data-site-field="location" type="text" value="${escapeHtml(permit.location || '')}">
-          </label>
-          <label class="wide">
-            <span>Attendance</span>
-            <input data-site-field="attendance" type="text" value="${escapeHtml(permit.assignedWorkers.join(', '))}">
+            <input data-site-field="location" type="text" value="${escapeHtml(siteFields.location)}" required>
           </label>
         </div>
-        <div class="check-grid">
-          ${siteCheck('toolboxTalkCompleted', 'TBT completed')}
-          ${siteCheck('ppeVerified', 'PPE verified')}
-          ${siteCheck('gasTestValid', 'Gas test valid')}
-          ${siteCheck('fireWatchAssigned', 'Fire watch assigned')}
-          ${siteCheck('barricadingVerified', 'Barricading verified')}
-          ${siteCheck('standbyPersonAssigned', 'Standby person assigned')}
-          ${siteCheck('rescueEquipmentReady', 'Rescue equipment ready')}
-          ${siteCheck('ventilationVerified', 'Ventilation verified')}
-          ${siteCheck('scaffoldInspectionValid', 'Scaffold inspected')}
-          ${siteCheck('lotoVerified', 'LOTO verified')}
-          ${siteCheck('liftingExclusionZoneVerified', 'Lifting exclusion zone')}
-          ${siteCheck('excavationProtectionVerified', 'Excavation protection')}
-          ${siteCheck('chemicalControlsVerified', 'Chemical controls')}
+        <div class="attendance-panel">
+          <div class="attendance-head">
+            <strong>Attendance</strong>
+            <span>Confirm present assigned workers by worker ID.</span>
+          </div>
+          <div class="attendance-list">
+            ${renderAttendanceRows(permit, siteFields.attendance)}
+          </div>
+        </div>
+        <div class="site-validation-summary">
+          <strong>${completedCount}/${checklists.length} checklists completed</strong>
+          <span>Confirm actual date, location, attendance, and every required checklist before Permit Approval.</span>
+        </div>
+        <div class="site-checklist-grid">
+          ${checklists.map((checklist) => siteChecklistCard(permit.id, checklist)).join('')}
         </div>
       </section>
     `;
   }
 
-  function siteCheck(field, label) {
+  function renderAttendanceRows(permit, attendance = {}) {
+    if (!permit.assignedWorkers.length) {
+      return '<div class="attendance-empty">No assigned workers found. Return the permit for correction before approval.</div>';
+    }
+
+    return permit.assignedWorkers
+      .map((workerId) => {
+        const worker = workerAttendanceIdentity(workerId);
+        const checked = attendance?.[worker.reference] ? 'checked' : '';
+        return `
+          <label class="attendance-row">
+            <input data-attendance-worker="${escapeHtml(worker.reference)}" type="checkbox" ${checked}>
+            <span>
+              <strong>${escapeHtml(worker.id || worker.reference)}</strong>
+              <em>${escapeHtml(worker.name)}</em>
+              <small>${escapeHtml(worker.status)}</small>
+            </span>
+          </label>
+        `;
+      })
+      .join('');
+  }
+
+  function siteChecklistCard(permitId, checklist) {
+    const completed = isSiteChecklistComplete(permitId, checklist);
+    const checkedCount = getCheckedSiteChecklistCount(permitId, checklist);
     return `
-      <label>
-        <input data-site-field="${field}" type="checkbox">
-        ${escapeHtml(label)}
-      </label>
+      <button class="site-checklist-card ${completed ? 'complete' : ''}" type="button" data-site-checklist="${escapeHtml(checklist.key)}">
+        <span>
+          <strong>${escapeHtml(checklist.title)}</strong>
+          <em>${escapeHtml(checklist.summary)}</em>
+        </span>
+        <b>
+          <small>${completed ? 'Review' : 'Open'}</small>
+          ${completed ? 'Complete' : `${checkedCount}/${checklist.items.length}`}
+        </b>
+      </button>
     `;
+  }
+
+  function getSiteValidationChecklists(permit) {
+    const text = getPermitValidationText(permit);
+    const checklists = [
+      {
+        key: 'work-readiness',
+        title: 'Work Readiness',
+        summary: 'Date, location, attendance, TBT, and nearby activity check',
+        items: [
+          'Actual work date matches approved permit window',
+          'Actual work location matches the permit location',
+          'All assigned workers are present and fit for work',
+          'Toolbox talk completed for today before work starts',
+          'Nearby simultaneous work checked for conflict',
+        ],
+      },
+      {
+        key: 'ppe',
+        title: 'PPE',
+        summary: 'Required PPE is available, worn, and fit for use',
+        items: buildPpeChecklistItems(permit),
+      },
+    ];
+
+    if (/hot\s*work|welding|cutting|grinding|spark|flame/i.test(text)) {
+      checklists.push({
+        key: 'hot-work',
+        title: 'Hot Work',
+        summary: 'Fire prevention, gas test, fire watch, and spark control',
+        items: [
+          'Combustible materials removed or protected from the hot work area',
+          'Fire extinguisher or hose reel available at the work front',
+          'Fire watch assigned and briefed on stop-work authority',
+          'Gas test completed and reading is within safe limit',
+          'Drains, vents, openings, and lower levels protected from sparks',
+          'Hot work equipment, cables, and hoses inspected before use',
+        ],
+      });
+    }
+
+    if (/loto|lock\s*out|tag\s*out|isolation|isolat|electrical|energ/i.test(text)) {
+      checklists.push({
+        key: 'loto',
+        title: 'LOTO / Isolation',
+        summary: 'Energy sources isolated, locked, tagged, and verified',
+        items: [
+          'All energy sources and isolation points identified',
+          'Lock and tag applied by authorized person',
+          'Stored energy released, drained, discharged, or restrained',
+          'Zero-energy verification completed before work starts',
+          'Try-start or test-before-touch completed where applicable',
+          'Isolation register or LOTO record matches the work scope',
+        ],
+      });
+    }
+
+    if (/confined\s*space|tank|vessel|manhole|pit/i.test(text)) {
+      checklists.push({
+        key: 'confined-space',
+        title: 'Confined Space',
+        summary: 'Entry control, gas test, ventilation, standby, and rescue',
+        items: [
+          'Entry point controlled and entrant list ready',
+          'Gas test completed for oxygen, flammable gas, and toxic gas',
+          'Ventilation running and suitable for the space',
+          'Standby person assigned outside the space',
+          'Rescue equipment and emergency response route ready',
+          'Communication method between entrant and standby confirmed',
+        ],
+      });
+    }
+
+    if (/height|scaffold|ladder|roof|harness|lanyard/i.test(text)) {
+      checklists.push({
+        key: 'work-at-height',
+        title: 'Work at Height',
+        summary: 'Access, fall protection, anchor points, and exclusion zone',
+        items: [
+          'Scaffold, ladder, or access platform inspected before use',
+          'Harness and lanyard inspected and worn correctly',
+          'Anchor point is suitable and located above the worker where practical',
+          'Tools and materials secured against falling objects',
+          'Drop zone or barricade established below the work area',
+          'Weather and surface conditions are safe for height work',
+        ],
+      });
+    }
+
+    if (/chemical|solvent|acid|alkali|sds|spill/i.test(text)) {
+      checklists.push({
+        key: 'chemical',
+        title: 'Chemical Controls',
+        summary: 'SDS, handling controls, spill response, and chemical PPE',
+        items: [
+          'SDS available and reviewed by the work team',
+          'Chemical containers labelled and compatible with the work',
+          'Spill kit, eyewash, or emergency shower available as required',
+          'Chemical-resistant PPE selected and inspected',
+          'Ventilation or containment controls ready before handling',
+          'Waste and contaminated material disposal method confirmed',
+        ],
+      });
+    }
+
+    if (/lifting|crane|hoist|rigging|sling|forklift/i.test(text)) {
+      checklists.push({
+        key: 'lifting',
+        title: 'Lifting',
+        summary: 'Lifting plan, rigging, exclusion zone, and communication',
+        items: [
+          'Lifting plan or method confirmed for the load',
+          'Crane, hoist, forklift, or lifting device inspected',
+          'Slings, shackles, hooks, and lifting accessories certified and inspected',
+          'Load weight and lifting points confirmed',
+          'Exclusion zone established and controlled',
+          'Signal person or communication method confirmed',
+        ],
+      });
+    }
+
+    return checklists;
+  }
+
+  function buildPpeChecklistItems(permit) {
+    const ppe = Array.isArray(permit.ppe) ? permit.ppe.map((item) => String(item || '').trim()).filter(Boolean) : [];
+    const listedPpe = ppe.length ? ppe : ['Required PPE'];
+    return [
+      ...listedPpe.map((item) => `${item} available, worn, and fit for use`),
+      'Damaged or expired PPE removed from use',
+      'PPE matches the work method and site conditions',
+    ];
+  }
+
+  function getPermitValidationText(permit) {
+    const documentData = (permit.documents || [])
+      .map((document) => Object.values(normalizeStructuredData(document.structuredData || {})).join(' '))
+      .join(' ');
+    return [
+      permit.title,
+      permit.workType,
+      permit.description,
+      ...(permit.hazards || []),
+      ...(permit.controls || []),
+      ...(permit.ppe || []),
+      documentData,
+    ].join(' ');
+  }
+
+  function getSiteChecklistState(permitId, checklistKey) {
+    return state.siteValidationChecklists?.[permitId]?.[checklistKey] || { checked: {}, notes: '' };
+  }
+
+  function getCheckedSiteChecklistCount(permitId, checklist) {
+    const checklistState = getSiteChecklistState(permitId, checklist.key);
+    return checklist.items.filter((item) => checklistState.checked?.[checklistItemId(item)]).length;
+  }
+
+  function isSiteChecklistComplete(permitId, checklist) {
+    return checklist.items.length > 0 && getCheckedSiteChecklistCount(permitId, checklist) === checklist.items.length;
+  }
+
+  function checklistItemId(item) {
+    return String(item || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  }
+
+  function ensureSiteChecklistDialog() {
+    if (elements.siteChecklistDialog && elements.siteChecklistDialogContent) return true;
+
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      `
+        <dialog class="site-checklist-dialog" id="siteChecklistDialog">
+          <form method="dialog">
+            <button class="dialog-close" value="cancel" aria-label="Close site validation checklist">x</button>
+          </form>
+          <div class="site-checklist-dialog-content" id="siteChecklistDialogContent"></div>
+        </dialog>
+      `,
+    );
+    elements.siteChecklistDialog = document.querySelector('#siteChecklistDialog');
+    elements.siteChecklistDialogContent = document.querySelector('#siteChecklistDialogContent');
+    return Boolean(elements.siteChecklistDialog && elements.siteChecklistDialogContent);
+  }
+
+  function openSiteChecklistDialog(permit, checklistKey) {
+    const checklist = getSiteValidationChecklists(permit).find((item) => item.key === checklistKey);
+    if (!checklist || !ensureSiteChecklistDialog()) {
+      showDecisionMessage('Unable to open checklist popup. Refresh the page and try again.', true);
+      return;
+    }
+
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    const checklistState = getSiteChecklistState(permit.id, checklist.key);
+    const checkedCount = getCheckedSiteChecklistCount(permit.id, checklist);
+    const isComplete = checkedCount === checklist.items.length;
+    elements.siteChecklistDialogContent.innerHTML = `
+      <div class="site-dialog-head">
+        <div>
+          <h3>${escapeHtml(checklist.title)} Checklist</h3>
+          <p>${escapeHtml(checklist.summary)}</p>
+        </div>
+        <span class="site-progress-pill ${isComplete ? 'complete' : ''}" data-site-check-progress>
+          ${escapeHtml(`${checkedCount}/${checklist.items.length}`)}
+        </span>
+      </div>
+      <div class="site-dialog-list">
+        ${checklist.items.map((item) => {
+          const itemId = checklistItemId(item);
+          return `
+            <label>
+              <input type="checkbox" data-site-check-item="${escapeHtml(itemId)}" ${checklistState.checked?.[itemId] ? 'checked' : ''}>
+              <span>${escapeHtml(item)}</span>
+            </label>
+          `;
+        }).join('')}
+      </div>
+      <label class="site-dialog-notes">
+        <span>Site notes</span>
+        <textarea id="siteChecklistNotes" placeholder="Optional validation notes">${escapeHtml(checklistState.notes || '')}</textarea>
+      </label>
+      <div class="dialog-actions">
+        <button class="ghost-button" type="button" data-site-checklist-close>Cancel</button>
+        <button class="dark-button" type="button" data-site-checklist-save="${escapeHtml(checklist.key)}" ${isComplete ? '' : 'disabled'}>Save Checklist</button>
+      </div>
+    `;
+
+    elements.siteChecklistDialogContent
+      .querySelector('[data-site-checklist-close]')
+      ?.addEventListener('click', closeSiteChecklistDialog);
+    elements.siteChecklistDialogContent
+      .querySelector('[data-site-checklist-save]')
+      ?.addEventListener('click', () => {
+        saveSiteChecklist(permit, checklist).catch((error) => {
+          showDecisionMessage(error.error || error.message || 'Unable to save checklist notes.', true);
+        });
+      });
+    elements.siteChecklistDialogContent
+      .querySelectorAll('[data-site-check-item]')
+      .forEach((input) => input.addEventListener('change', () => updateSiteChecklistDialogState(checklist)));
+    updateSiteChecklistDialogState(checklist);
+
+    try {
+      if (typeof elements.siteChecklistDialog.showModal === 'function' && !elements.siteChecklistDialog.open) {
+        elements.siteChecklistDialog.showModal();
+      } else {
+        elements.siteChecklistDialog.setAttribute('open', '');
+      }
+    } catch {
+      elements.siteChecklistDialog.setAttribute('open', '');
+    }
+    requestAnimationFrame(() => window.scrollTo(scrollX, scrollY));
+  }
+
+  function updateSiteChecklistDialogState(checklist) {
+    const dialogContent = elements.siteChecklistDialogContent;
+    if (!dialogContent) return;
+
+    const inputs = Array.from(dialogContent.querySelectorAll('[data-site-check-item]'));
+    const totalCount = checklist?.items?.length || inputs.length;
+    const checkedCount = inputs.filter((input) => input.checked).length;
+    const isComplete = totalCount > 0 && checkedCount === totalCount;
+    const progress = dialogContent.querySelector('[data-site-check-progress]');
+    const saveButton = dialogContent.querySelector('[data-site-checklist-save]');
+
+    if (progress) {
+      progress.textContent = `${checkedCount}/${totalCount}`;
+      progress.classList.toggle('complete', isComplete);
+    }
+
+    if (saveButton) {
+      saveButton.disabled = !isComplete;
+      saveButton.title = isComplete ? '' : 'Complete all checklist items before saving';
+      saveButton.setAttribute('aria-disabled', String(!isComplete));
+    }
+  }
+
+  async function saveSiteChecklist(permit, checklist) {
+    const checked = {};
+    elements.siteChecklistDialogContent
+      .querySelectorAll('[data-site-check-item]')
+      .forEach((input) => {
+        checked[input.dataset.siteCheckItem] = input.checked;
+      });
+
+    const missing = checklist.items.filter((item) => !checked[checklistItemId(item)]);
+    if (missing.length) {
+      showDecisionMessage(`Complete all ${checklist.title} checks before saving.`, true);
+      return;
+    }
+
+    state.siteValidationChecklists[permit.id] = {
+      ...(state.siteValidationChecklists[permit.id] || {}),
+      [checklist.key]: {
+        checked,
+        notes: elements.siteChecklistDialogContent.querySelector('#siteChecklistNotes')?.value.trim() || '',
+        updatedAt: new Date().toISOString(),
+      },
+    };
+    updatePermitSiteValidationState(permit.id, state.siteValidationChecklists[permit.id]);
+    persistStoredObject(SITE_VALIDATION_STORAGE_KEY, state.siteValidationChecklists);
+    await saveSiteValidationToServer(permit);
+    closeSiteChecklistDialog();
+    renderPermitDetail(state.permits.find((item) => item.id === permit.id) || permit);
+    showDecisionMessage(`${checklist.title} checklist completed.`, false);
+  }
+
+  function closeSiteChecklistDialog() {
+    if (typeof elements.siteChecklistDialog?.close === 'function') {
+      elements.siteChecklistDialog.close();
+    } else {
+      elements.siteChecklistDialog?.removeAttribute('open');
+    }
   }
 
   function renderDecisionPanel(permit) {
@@ -786,7 +1440,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (permit.status === 'approved') {
-      return 'Stage 2 is complete. This normal permit is now waiting for Supervisor final approval before work starts.';
+      return 'Permit Approval is complete. This normal permit is now waiting for Supervisor final approval before work starts.';
     }
 
     if (permit.status === 'active') {
@@ -798,12 +1452,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (permit.status === 'stage1_complete') {
-      return 'Stage 1 passed. Complete Stage 2 site validation, then submit to Supervisor.';
+      return 'MOS Approval passed. Complete Permit Approval site validation, then submit to Supervisor.';
     }
 
     return permit.isEmergency
-      ? 'Emergency review covers Stage 1 evidence and Stage 2 site readiness. Approving here is the final safety approval.'
-      : 'Review Stage 1 evidence. Approve to move this permit to Stage 2, or reject to return it to the requester.';
+      ? 'Emergency review covers MOS Approval evidence and Permit Approval site readiness. Approving here is the final safety approval.'
+      : 'Review MOS Approval evidence. Approve to move this permit to Permit Approval, or reject to return it to the requester.';
   }
 
   function getActions(permit) {
@@ -830,14 +1484,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (permit.status === 'submitted') {
       return [
         { key: 'reject', label: 'Reject / Return', className: 'danger-button' },
-        { key: 'approve-stage1', label: 'Approve Stage 1', className: 'dark-button' },
+        { key: 'approve-stage1', label: 'Approve MOS', className: 'dark-button' },
       ];
     }
 
     if (permit.status === 'stage1_complete') {
       return [
         { key: 'reject', label: 'Reject / Return', className: 'danger-button' },
-        { key: 'approve-stage2', label: 'Approve Stage 2 & Submit to Supervisor', className: 'dark-button' },
+        { key: 'approve-stage2', label: 'Approve Permit & Submit to Supervisor', className: 'dark-button' },
       ];
     }
 
@@ -866,50 +1520,134 @@ document.addEventListener('DOMContentLoaded', () => {
         await applyStatus(
           permit,
           'stage1_complete',
-          approvalComment('Safety Officer approved Stage 1. Permit moved to Stage 2 site validation.', note),
+          approvalComment('Safety Officer approved MOS Approval. Permit moved to Permit Approval site validation.', note),
         );
         setView('stage2');
         return;
       }
 
       if (action === 'approve-stage2') {
+        if (!(await ensureSiteValidationComplete(permit))) return;
         await applyStatus(
           permit,
           'approved',
-          approvalComment('Safety Officer approved Stage 2. Permit submitted to Supervisor for final approval.', note),
+          approvalComment(`Safety Officer approved Permit Approval. ${siteValidationSummary(permit)} Permit submitted to Supervisor for final approval.`, note),
         );
         setView('all');
         return;
       }
 
       if (action === 'approve-emergency') {
+        if (!(await ensureSiteValidationComplete(permit))) return;
         await applyStatus(
           permit,
           'approved',
-          approvalComment('Safety Officer approved emergency permit Stage 1 and Stage 2 checks.', note),
+          approvalComment(`Safety Officer approved emergency permit MOS Approval and Permit Approval checks. ${siteValidationSummary(permit)}`, note),
           { refresh: false },
         );
         const updatedPermit = await getPermit(permit.id);
         await applyStatus(
           updatedPermit,
           'active',
-          approvalComment('Emergency permit final approval completed by Safety Officer. Work is active.', note),
+          approvalComment(`Emergency permit final approval completed by Safety Officer. ${siteValidationSummary(permit)} Work is active.`, note),
         );
         setView('all');
         return;
       }
 
       if (action === 'activate-emergency') {
+        if (!(await ensureSiteValidationComplete(permit))) return;
         await applyStatus(
           permit,
           'active',
-          approvalComment('Emergency permit final activation completed by Safety Officer.', note),
+          approvalComment(`Emergency permit final activation completed by Safety Officer. ${siteValidationSummary(permit)}`, note),
         );
         setView('all');
       }
     } catch (error) {
       showDecisionMessage(error.error || error.message || 'Unable to update permit decision.', true);
     }
+  }
+
+  async function ensureSiteValidationComplete(permit) {
+    const siteFields = readSiteValidationFieldsFromDom(permit);
+    persistSiteValidationFields(permit, siteFields);
+
+    const missingFields = [
+      ['Actual work date', siteFields.actualWorkDate],
+      ['Actual location', siteFields.location],
+    ].filter(([, value]) => !String(value || '').trim());
+    if (missingFields.length) {
+      showDecisionMessage(
+        `Complete site validation field(s): ${missingFields.map(([label]) => label).join(', ')}.`,
+        true,
+      );
+      elements.permitDetail.querySelector(`[data-site-field="${missingFields[0][0] === 'Actual work date' ? 'actualWorkDate' : missingFields[0][0] === 'Actual location' ? 'location' : 'attendance'}"]`)?.focus();
+      return false;
+    }
+
+    if (!isActualWorkDateWithinPermitWindow(permit, siteFields.actualWorkDate)) {
+      showDecisionMessage('Actual work date must be within the approved permit schedule.', true);
+      elements.permitDetail.querySelector('[data-site-field="actualWorkDate"]')?.focus();
+      return false;
+    }
+
+    const attendance = siteFields.attendance && typeof siteFields.attendance === 'object' ? siteFields.attendance : {};
+    const assignedWorkerIds = permit.assignedWorkers || [];
+    if (!assignedWorkerIds.length) {
+      showDecisionMessage('At least one assigned worker is required before Permit Approval.', true);
+      return false;
+    }
+
+    const presentWorkers = assignedWorkerIds.filter((workerId) => attendance[String(workerId || '').trim()]);
+    if (!presentWorkers.length) {
+      showDecisionMessage('Mark at least one assigned worker as present before Permit Approval.', true);
+      elements.permitDetail.querySelector('[data-attendance-worker]')?.focus();
+      return false;
+    }
+
+    const incompleteChecklist = getSiteValidationChecklists(permit).find(
+      (checklist) => !isSiteChecklistComplete(permit.id, checklist),
+    );
+    if (!incompleteChecklist) {
+      await saveSiteValidationToServer(permit);
+      return true;
+    }
+
+    showDecisionMessage(`Complete ${incompleteChecklist.title} checklist before Permit Approval.`, true);
+    openSiteChecklistDialog(permit, incompleteChecklist.key);
+    return false;
+  }
+
+  function isActualWorkDateWithinPermitWindow(permit, actualWorkDate) {
+    if (!actualWorkDate) return false;
+    const startDay = dateOnlyFromValue(permit.startDateTime);
+    const endDay = dateOnlyFromValue(permit.endDateTime);
+    if (!startDay || !endDay) return true;
+    return actualWorkDate >= startDay && actualWorkDate <= endDay;
+  }
+
+  function dateOnlyFromValue(value) {
+    const direct = String(value || '').match(/^(\d{4}-\d{2}-\d{2})/);
+    if (direct) return direct[1];
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+  }
+
+  function siteValidationSummary(permit) {
+    const fields = getSiteValidationFields(permit);
+    const record = getSiteValidationRecord(permit);
+    const attendance = fields.attendance && typeof fields.attendance === 'object' ? fields.attendance : {};
+    const presentWorkers = (permit.assignedWorkers || [])
+      .filter((workerId) => attendance[String(workerId || '').trim()])
+      .map((workerId) => workerAttendanceIdentity(workerId).label);
+    const checklistNotes = getSiteValidationChecklists(permit)
+      .map((checklist) => {
+        const notes = String(record?.[checklist.key]?.notes || '').trim();
+        return notes ? `${checklist.title}: ${notes}` : '';
+      })
+      .filter(Boolean);
+    return `Site validation confirmed. Actual work date: ${fields.actualWorkDate || '-'}; actual location: ${fields.location || '-'}; attendance: ${presentWorkers.join(', ') || '-'}${checklistNotes.length ? `; checklist notes: ${checklistNotes.join(' | ')}` : ''}.`;
   }
 
   function approvalComment(defaultComment, note) {
@@ -947,6 +1685,54 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   }
 
+  function permitExportFileName(permit) {
+    const label = String(permit?.id || permit?.title || 'permit')
+      .trim()
+      .replace(/[\\/:*?"<>|]+/g, '-')
+      .replace(/\s+/g, '-');
+    return `${label || 'permit'}-MOS-JSA.xlsx`;
+  }
+
+  async function downloadMosJsaExcel(permit) {
+    const documents = ['MOS', 'JSA']
+      .map((type) => getStructuredDocument(permit, type))
+      .filter(Boolean);
+
+    if (!documents.length) {
+      throw new Error('No MOS/JSA digital form data available for export.');
+    }
+
+    const response = await fetch('/api/permit-document-templates/mos-jsa/export', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${state.session.token}`,
+      },
+      body: JSON.stringify({ documents }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      let body = {};
+      try {
+        body = text ? JSON.parse(text) : {};
+      } catch {
+        body = { error: text };
+      }
+      throw body;
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = permitExportFileName(permit);
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
   async function applyStatus(permit, status, comment, options = {}) {
     const refreshAfter = options.refresh !== false;
     await apiRequest(`/api/permits/${encodeURIComponent(permit.id)}/status`, {
@@ -969,8 +1755,8 @@ document.addEventListener('DOMContentLoaded', () => {
   function stageFromLog(log, permit) {
     const comment = String(log.comment || '').toLowerCase();
     if (permit?.isEmergency) return 'Emergency';
-    if (log.status === 'stage1_complete' || comment.includes('stage 1')) return 'Stage 1';
-    if (log.status === 'approved' || comment.includes('stage 2')) return 'Stage 2';
+    if (log.status === 'stage1_complete' || comment.includes('mos approval') || comment.includes('stage 1')) return 'MOS Approval';
+    if (log.status === 'approved' || comment.includes('permit approval') || comment.includes('stage 2')) return 'Permit Approval';
     if (log.status === 'active') return 'Supervisor/Work';
     if (log.status === 'rejected') return 'Rejected';
     return 'Workflow';
@@ -1053,6 +1839,21 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!button) return;
       setView(button.dataset.notificationView);
       setNotificationPanel(false);
+    });
+    elements.permitDetail?.addEventListener('click', (event) => {
+      const checklistButton = event.target.closest('[data-site-checklist]');
+      if (!checklistButton || !elements.permitDetail.contains(checklistButton)) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const permit = state.permits.find((item) => item.id === state.selectedPermitId);
+      if (!permit) {
+        showDecisionMessage('Select a permit before opening the checklist.', true);
+        return;
+      }
+
+      openSiteChecklistDialog(permit, checklistButton.dataset.siteChecklist);
     });
     document.addEventListener('click', (event) => {
       if (elements.notificationPanel?.hidden) return;

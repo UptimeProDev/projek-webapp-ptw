@@ -17,6 +17,8 @@ document.addEventListener('DOMContentLoaded', () => {
     routingItems: document.querySelector('#routingItems'),
     routingCount: document.querySelector('#routingCount'),
     routingDetail: document.querySelector('#routingDetail'),
+    userRoleList: document.querySelector('#userRoleList'),
+    userRoleCount: document.querySelector('#userRoleCount'),
     auditBody: document.querySelector('#auditBody'),
     auditCount: document.querySelector('#auditCount'),
     refreshButton: document.querySelector('#refreshButton'),
@@ -34,8 +36,14 @@ document.addEventListener('DOMContentLoaded', () => {
     filterPermit: document.querySelector('#filterPermit'),
     clearFiltersButton: document.querySelector('#clearFiltersButton'),
     addWorkerButton: document.querySelector('#addWorkerButton'),
+    addWorkerDialog: document.querySelector('#addWorkerDialog'),
     addWorkerForm: document.querySelector('#addWorkerForm'),
+    addWorkerDialogTitle: document.querySelector('#addWorkerDialogTitle'),
+    addWorkerDialogSubtitle: document.querySelector('#addWorkerDialogSubtitle'),
+    addWorkerKicker: document.querySelector('#addWorkerKicker'),
+    addWorkerMessage: document.querySelector('#addWorkerMessage'),
     addWorkerSubmit: document.querySelector('#addWorkerSubmit'),
+    cancelAddWorkerButton: document.querySelector('#cancelAddWorkerButton'),
     newWorkerName: document.querySelector('#newWorkerName'),
     newWorkerIcPassport: document.querySelector('#newWorkerIcPassport'),
     newWorkerId: document.querySelector('#newWorkerId'),
@@ -50,9 +58,7 @@ document.addEventListener('DOMContentLoaded', () => {
     workerReviewTitle: document.querySelector('#workerReviewTitle'),
     workerReviewSubtitle: document.querySelector('#workerReviewSubtitle'),
     workerReviewBody: document.querySelector('#workerReviewBody'),
-    workerReturnReason: document.querySelector('#workerReturnReason'),
     approveWorkerButton: document.querySelector('#approveWorkerButton'),
-    returnWorkerButton: document.querySelector('#returnWorkerButton'),
     settingsButton: document.querySelector('#settingsButton'),
     supportButton: document.querySelector('#supportButton'),
   };
@@ -61,12 +67,15 @@ document.addEventListener('DOMContentLoaded', () => {
     competency: document.querySelector('#manageCompetencySection'),
     draftReview: document.querySelector('#permitQueueSection'),
     routing: document.querySelector('#permitClosureSection'),
+    userRoles: document.querySelector('#userRolesSection'),
     auditTrails: document.querySelector('#auditTrailsSection'),
   };
 
   const state = {
     session: readSession(),
     workers: [],
+    users: [],
+    assignableRoles: [],
     permits: [],
     audits: [],
     notifications: [],
@@ -81,7 +90,7 @@ document.addEventListener('DOMContentLoaded', () => {
     'Electrical Isolation',
     'Work at Height',
     'Line Breaking',
-    'General Maintenance',
+    'Chemical Handling',
   ];
 
   const workerRoleOptions = [
@@ -120,6 +129,13 @@ document.addEventListener('DOMContentLoaded', () => {
     'First Aid',
   ];
 
+  const userRoleLabels = {
+    admin: 'Admin',
+    requester: 'Requester',
+    supervisor: 'Supervisor',
+    safety_officer: 'Safety Officer',
+  };
+
   const workerPermitAliases = new Map(
     [
       ['Hot Work', 'Hot Work'],
@@ -135,8 +151,8 @@ document.addEventListener('DOMContentLoaded', () => {
       ['WAH', 'Work at Height'],
       ['Line Breaking', 'Line Breaking'],
       ['Line Break', 'Line Breaking'],
-      ['General Maintenance', 'General Maintenance'],
-      ['Maintenance', 'General Maintenance'],
+      ['Chemical Handling', 'Chemical Handling'],
+      ['Chemical', 'Chemical Handling'],
     ].map(([alias, canonical]) => [permitTypeKey(alias), canonical]),
   );
 
@@ -171,18 +187,49 @@ document.addEventListener('DOMContentLoaded', () => {
     localStorage.setItem(key, JSON.stringify(value));
   }
 
+  function pruneCompletionRequests(requests, permits) {
+    const permitIds = new Set((permits || []).map((permit) => String(permit.id)));
+    const entries = Object.entries(requests || {}).filter(([, request]) =>
+      request?.permitId && permitIds.has(String(request.permitId)),
+    );
+    return Object.fromEntries(entries);
+  }
+
   function getRoleUrl(role) {
     const normalized = String(role || '').toLowerCase();
     if (normalized === 'requester') return '/dashboard';
     if (normalized === 'safety_officer') return '/safety';
     if (normalized === 'supervisor') return '/review';
-    if (normalized === 'approver') return '/approver';
     if (normalized === 'worker') return '/worker';
     return '/login';
   }
 
+  function getUserRoles(user) {
+    const roles = Array.isArray(user?.roles) ? user.roles : [user?.role];
+    return roles
+      .map((role) => String(role || '').toLowerCase())
+      .map((role) => role === 'approver' ? 'supervisor' : role)
+      .filter(Boolean)
+      .filter((role, index, list) => list.indexOf(role) === index);
+  }
+
+  function userHasRole(user, role) {
+    return getUserRoles(user).includes(role);
+  }
+
+  function userHasAnyRole(user, roles) {
+    return roles.some((role) => userHasRole(user, role));
+  }
+
+  function roleLabel(role) {
+    return userRoleLabels[role] || String(role || 'User').replace(/_/g, ' ');
+  }
+
   function redirectToRoleHome() {
-    const target = getRoleUrl(state.session?.user?.role);
+    const roles = getUserRoles(state.session?.user);
+    const preferredRole = ['safety_officer', 'supervisor', 'requester', 'worker']
+      .find((role) => roles.includes(role)) || state.session?.user?.role;
+    const target = getRoleUrl(preferredRole);
     if (target !== '/login') {
       window.location.replace(target);
       return true;
@@ -424,6 +471,52 @@ document.addEventListener('DOMContentLoaded', () => {
     URL.revokeObjectURL(blobUrl);
   }
 
+  function permitExportFileName(permit) {
+    const label = String(permit?.id || permit?.title || 'permit')
+      .trim()
+      .replace(/[\\/:*?"<>|]+/g, '-')
+      .replace(/\s+/g, '-');
+    return `${label || 'permit'}-MOS-JSA.xlsx`;
+  }
+
+  async function downloadMosJsaExcel(permitId) {
+    const permit = state.permits.find((item) => item.id === permitId);
+    const documents = (permit?.documents || []).filter(isStructuredMosJsaDocument);
+    if (!permit || !documents.length) {
+      throw new Error('No MOS/JSA digital form data available for export.');
+    }
+
+    const response = await fetch('/api/permit-document-templates/mos-jsa/export', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${state.session.token}`,
+      },
+      body: JSON.stringify({ documents }),
+    });
+
+    if (!response.ok) {
+      let message = 'Unable to export MOS/JSA Excel.';
+      try {
+        const body = await response.json();
+        message = body.error || message;
+      } catch {
+        // Ignore non-JSON body.
+      }
+      throw new Error(message);
+    }
+
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = permitExportFileName(permit);
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(blobUrl);
+  }
+
   function getWorkerRecord(id) {
     return state.workers.find((worker) => String(worker.id) === String(id));
   }
@@ -586,6 +679,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function formatStatus(status) {
+    if (String(status || '').toLowerCase() === 'resubmitted') return 'Resubmitted';
     return String(status || '')
       .replace(/_/g, ' ')
       .replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -594,7 +688,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function getPermitType(permit) {
     if (permit.workType) return permit.workType;
     const match = String(permit.description || '').match(/Permit Type:\s*([^\n]+)/i);
-    return match ? match[1].trim() : 'General Maintenance';
+    return match ? match[1].trim() : 'Preventive Maintenance';
   }
 
   function extractScope(description) {
@@ -605,6 +699,7 @@ document.addEventListener('DOMContentLoaded', () => {
       .filter((line) => !/^Permit Type:/i.test(line.trim()))
       .filter((line) => !/^Assigned Worker/i.test(line.trim()))
       .filter((line) => !/^Required Documents:/i.test(line.trim()))
+      .filter((line) => !/^(HIRARC|MOS|JSA):/i.test(line.trim()))
       .join('\n')
       .trim();
   }
@@ -614,11 +709,119 @@ document.addEventListener('DOMContentLoaded', () => {
     return list.length ? list.join(', ') : '-';
   }
 
+  const digitalDocumentLabels = {
+    MOS: {
+      title: 'MOS Digital Form',
+      fields: {
+        workTitle: 'Work Title',
+        workLocation: 'Work Location',
+        scope: 'Scope of Work',
+        methodSteps: 'Method Steps',
+        toolsEquipment: 'Tools / Equipment',
+        materials: 'Materials / Chemicals',
+        isolations: 'Isolation / Preparation',
+        responsiblePerson: 'Responsible Person',
+        emergencyArrangement: 'Emergency Arrangement',
+      },
+    },
+    JSA: {
+      title: 'JSA Digital Form',
+      fields: {
+        taskStep: 'Task Step / Activity',
+        permitTypeHazards: 'Permit Type / Hazard',
+        potentialConsequence: 'Potential Consequence',
+        controlMeasures: 'Control Measures',
+        requiredPpe: 'Required PPE',
+        responsiblePerson: 'Responsible Person',
+        residualRisk: 'Residual Risk',
+      },
+    },
+  };
+
+  function normalizeStructuredData(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+
+    return Object.entries(value).reduce((normalized, [key, rawValue]) => {
+      const cleanKey = String(key || '').trim();
+      if (!cleanKey) return normalized;
+      if (Array.isArray(rawValue)) {
+        const items = rawValue.map((item) => String(item || '').trim()).filter(Boolean);
+        if (items.length) normalized[cleanKey] = items.join('\n');
+        return normalized;
+      }
+      const cleanValue = String(rawValue || '').trim();
+      if (cleanValue) normalized[cleanKey] = cleanValue;
+      return normalized;
+    }, {});
+  }
+
+  function isStructuredMosJsaDocument(document) {
+    const type = String(document?.type || '').trim().toUpperCase();
+    const data = normalizeStructuredData(document?.structuredData);
+    return ['MOS', 'JSA'].includes(type) && Object.keys(data).length > 0;
+  }
+
+  function renderDigitalEvidence(permit) {
+    const documents = (permit.documents || []).filter(isStructuredMosJsaDocument);
+    if (!documents.length) return '';
+
+    return `
+      <section class="review-block">
+        <div class="review-block-head">
+          <h4>MOS / JSA Digital Evidence</h4>
+          <div class="review-block-actions">
+            <span class="badge valid">${documents.length}/2 forms</span>
+            <button class="btn small secondary" type="button" data-mos-jsa-export="${escapeHtml(permit.id)}">Export Excel</button>
+          </div>
+        </div>
+        <div class="admin-digital-evidence-grid">
+          ${documents.map(renderStructuredDocument).join('')}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderStructuredDocument(document) {
+    const type = String(document.type || '').trim().toUpperCase();
+    const schema = digitalDocumentLabels[type] || { title: `${type} Digital Form`, fields: {} };
+    const data = normalizeStructuredData(document.structuredData);
+    const knownRows = Object.entries(schema.fields)
+      .map(([key, label]) => [label, data[key]])
+      .filter(([, value]) => value);
+    const extraRows = Object.entries(data)
+      .filter(([key]) => !schema.fields[key])
+      .map(([key, value]) => [formatFieldLabel(key), value]);
+
+    return `
+      <article class="admin-digital-evidence-card">
+        <strong>${escapeHtml(schema.title)}</strong>
+        <dl>
+          ${[...knownRows, ...extraRows]
+            .map(
+              ([label, value]) => `
+                <div>
+                  <dt>${escapeHtml(label)}</dt>
+                  <dd>${escapeHtml(value)}</dd>
+                </div>
+              `,
+            )
+            .join('')}
+        </dl>
+      </article>
+    `;
+  }
+
+  function formatFieldLabel(key) {
+    return String(key || '')
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/[_-]+/g, ' ')
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+
   function renderPermitDocumentCards(permit) {
-    const documents = Array.isArray(permit?.documents) ? permit.documents : [];
-    if (!documents.length) {
-      return '<div class="document-empty">No documents uploaded for this draft.</div>';
-    }
+    const documents = (Array.isArray(permit?.documents) ? permit.documents : []).filter(
+      (document) => document?.hasAttachment,
+    );
 
     return `
       <div class="permit-document-grid">
@@ -645,11 +848,26 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
   }
 
+  function renderSupportingFiles(permit) {
+    const downloadableCount = (permit.documents || []).filter((doc) => doc.id && doc.hasAttachment).length;
+    if (!downloadableCount) return '';
+
+    return `
+      <section class="review-block">
+        <div class="review-block-head">
+          <h4>Supporting Files</h4>
+          <span class="badge pending">${downloadableCount} files</span>
+        </div>
+        ${renderPermitDocumentCards(permit)}
+      </section>
+    `;
+  }
+
   function statusBadge(status) {
     const normalized = String(status || '').toLowerCase();
     if (['valid', 'approved', 'active'].includes(normalized)) return 'valid';
-    if (['submitted', 'stage1_complete'].includes(normalized)) return 'pending';
-    if (['expired', 'rejected', 'returned'].includes(normalized)) return 'danger';
+    if (['submitted', 'resubmitted', 'stage1_complete'].includes(normalized)) return 'pending';
+    if (['expired', 'rejected', 'returned', 'inactive'].includes(normalized)) return 'danger';
     if (['expiring', 'warning', 'draft'].includes(normalized)) return 'warn';
     return 'pending';
   }
@@ -657,7 +875,8 @@ document.addEventListener('DOMContentLoaded', () => {
   function workerStatusLabel(status) {
     const normalized = String(status || 'submitted').toLowerCase();
     if (normalized === 'valid') return 'Valid';
-    if (normalized === 'rejected') return 'Returned';
+    if (normalized === 'inactive') return 'Inactive';
+    if (normalized === 'rejected') return 'Inactive';
     if (normalized === 'expired') return 'Expired';
     return 'Submitted';
   }
@@ -679,7 +898,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function requireAdmin() {
-    if (state.session?.user?.role === 'admin') {
+    if (userHasRole(state.session?.user, 'admin')) {
       elements.adminWarning?.classList.add('hidden');
       updateProfile(state.session.user);
       return true;
@@ -772,16 +991,23 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function loadData() {
-    const [workerResult, permitResult, notificationResult] = await Promise.all([
+    const [workerResult, permitResult, notificationResult, userResult] = await Promise.all([
       apiRequest('/api/workers'),
       apiRequest('/api/permits'),
       loadNotifications(),
+      apiRequest('/api/users'),
     ]);
 
     state.workers = workerResult.workers || workerResult.data || [];
     state.permits = permitResult.permits || permitResult.data || [];
     state.notifications = notificationResult.notifications || notificationResult.data || [];
-    state.completionRequests = readStoredObject(COMPLETION_STORAGE_KEY);
+    state.users = userResult.users || userResult.data || [];
+    state.assignableRoles = userResult.assignableRoles || [];
+    const storedCompletionRequests = readStoredObject(COMPLETION_STORAGE_KEY);
+    state.completionRequests = pruneCompletionRequests(storedCompletionRequests, state.permits);
+    if (Object.keys(state.completionRequests).length !== Object.keys(storedCompletionRequests).length) {
+      persistStoredObject(COMPLETION_STORAGE_KEY, state.completionRequests);
+    }
     syncRequesterWorkersStorage();
     renderNotifications();
   }
@@ -795,7 +1021,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function syncRequesterWorkersStorage() {
-    const requesterWorkers = state.workers.map((worker, index) => ({
+    const requesterWorkers = state.workers
+      .filter((worker) => String(worker.status || '').toLowerCase() === 'valid')
+      .map((worker, index) => ({
       id: worker.employeeId || worker.id || `W${String(index + 1).padStart(2, '0')}`,
       systemId: worker.id,
       name: worker.name,
@@ -838,11 +1066,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const titles = {
       competency: 'Worker Profile Review',
       draftReview: 'Review Draft Permits',
+      userRoles: 'User Role Management',
       auditTrails: 'Admin Audit Trail',
     };
     const subtitles = {
       competency: 'Review requester-submitted worker profiles, certifications, and permit authorization records.',
       draftReview: 'Clerically verify draft package completeness and formally submit to pending approval.',
+      userRoles: 'Assign multiple application access roles to non-worker accounts.',
       auditTrails: 'Track Lane 2 administrative actions and final closure history.',
     };
 
@@ -964,9 +1194,10 @@ document.addEventListener('DOMContentLoaded', () => {
       row.querySelector('[data-worker-status="valid"]')?.addEventListener('click', () =>
         updateWorkerReviewStatus(worker, 'valid'),
       );
-      row.querySelector('[data-worker-status="rejected"]')?.addEventListener('click', () =>
-        updateWorkerReviewStatus(worker, 'rejected'),
+      row.querySelector('[data-worker-status="inactive"]')?.addEventListener('click', () =>
+        updateWorkerReviewStatus(worker, 'inactive', 'Deactivated by Admin'),
       );
+      row.querySelector('[data-worker-delete]')?.addEventListener('click', () => deleteWorker(worker));
       row.querySelector('[data-worker-review]')?.addEventListener('click', () => openWorkerReview(worker));
       row.querySelectorAll('[data-worker-cert-download]').forEach((button) => {
         button.addEventListener('click', () => {
@@ -987,21 +1218,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderWorkerReviewActions(worker) {
     const status = String(worker.status || 'submitted').toLowerCase();
+    const deleteButton = '<button class="btn small danger" type="button" data-worker-delete>Delete</button>';
     if (status === 'submitted') {
       return `
         <span class="admin-actions">
-        <button class="btn small secondary" type="button" data-worker-review>Review</button>
-        <button class="btn small" type="button" data-worker-status="valid">Mark Valid</button>
-        <button class="btn small danger" type="button" data-worker-status="rejected">Return</button>
+          <button class="btn small secondary" type="button" data-worker-review>Review</button>
+          <button class="btn small" type="button" data-worker-status="valid">Mark Valid</button>
+          <button class="btn small secondary" type="button" data-worker-status="inactive">Deactivate</button>
+          ${deleteButton}
         </span>
       `;
     }
 
-    if (status === 'rejected') {
+    if (status === 'inactive' || status === 'rejected') {
       return `
         <span class="admin-actions">
           <button class="btn small secondary" type="button" data-worker-review>Review</button>
-          <span class="meta-muted">${escapeHtml(worker.reviewComment || 'Returned for correction')}</span>
+          <button class="btn small" type="button" data-worker-status="valid">Reactivate</button>
+          ${deleteButton}
+          <span class="meta-muted">${escapeHtml(worker.reviewComment || 'Inactive')}</span>
         </span>
       `;
     }
@@ -1009,6 +1244,8 @@ document.addEventListener('DOMContentLoaded', () => {
     return `
       <span class="admin-actions">
         <button class="btn small secondary" type="button" data-worker-review>Review</button>
+        <button class="btn small secondary" type="button" data-worker-status="inactive">Deactivate</button>
+        ${deleteButton}
       </span>
     `;
   }
@@ -1019,9 +1256,7 @@ document.addEventListener('DOMContentLoaded', () => {
     state.activeReviewWorkerId = worker.id;
     elements.workerReviewTitle.textContent = worker.name || 'Worker profile';
     elements.workerReviewSubtitle.textContent = `${worker.employeeId || worker.id || '-'} - ${status}`;
-    elements.workerReturnReason.value = worker.reviewComment || '';
     elements.approveWorkerButton.disabled = String(worker.status || '').toLowerCase() === 'valid';
-    elements.returnWorkerButton.disabled = false;
 
     elements.workerReviewBody.innerHTML = `
       <section class="review-summary">
@@ -1046,7 +1281,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       ${
         worker.reviewComment
-          ? `<div class="review-comment">Return reason: ${escapeHtml(worker.reviewComment)}</div>`
+          ? `<div class="review-comment">Admin note: ${escapeHtml(worker.reviewComment)}</div>`
           : ''
       }
 
@@ -1077,7 +1312,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function getDraftQueue() {
-    return state.permits.filter((permit) => !permit.isEmergency && ['draft', 'rejected'].includes(permit.status));
+    return state.permits.filter((permit) => !permit.isEmergency && ['draft', 'rejected', 'resubmitted'].includes(permit.status));
   }
 
   function getSubmittedQueue() {
@@ -1112,7 +1347,7 @@ document.addEventListener('DOMContentLoaded', () => {
       item.innerHTML = `
         <div>
           <div class="name">${escapeHtml(permit.title)}</div>
-          <div class="meta-muted">${escapeHtml(permit.id)} - ${escapeHtml(permit.location)}</div>
+          <div class="meta-muted">${escapeHtml(permit.location || '-')}</div>
         </div>
         <div class="queue-meta">
           <span class="badge ${statusBadge(permit.status)}">${formatStatus(permit.status)}</span>
@@ -1153,27 +1388,45 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    const documentCount = (permit.documents || []).length;
     const downloadableCount = (permit.documents || []).filter((doc) => doc.id && doc.hasAttachment).length;
+    const digitalEvidenceCount = (permit.documents || []).filter(isStructuredMosJsaDocument).length;
     const workers = formatList(permit.assignedWorkers);
-    const canSubmit = ['draft', 'rejected'].includes(permit.status);
+    const needsRequesterRevision = permit.status === 'rejected' && permit.needsRequesterRevisionBeforeAdminSubmit;
+    const canSubmit = permit.status === 'draft' || permit.status === 'resubmitted' || (permit.status === 'rejected' && !needsRequesterRevision);
     const routeText = formatList(permit.approvers);
+    const actionMarkup = canSubmit
+      ? '<button class="btn small" id="submitPermitButton" type="button">Submit to Approval Route</button>'
+      : needsRequesterRevision
+        ? '<span class="badge danger">Awaiting requester correction</span>'
+        : '<span class="badge pending">Already routed to pending approval</span>';
+    const rejectionMarkup = permit.status === 'rejected'
+      ? `
+        <section class="review-block">
+          <div class="review-block-head">
+            <h4>Latest Rejection Reason</h4>
+            <span class="badge danger">${escapeHtml(permit.latestRejectionByRole || 'Reviewer')}</span>
+          </div>
+          <p class="detail-text">${escapeHtml(permit.latestRejectionReason || 'No rejection reason recorded.')}</p>
+          <p class="muted">${escapeHtml(permit.latestRejectionBy || 'Reviewer')} - ${formatDateTime(permit.latestRejectionAt)}</p>
+        </section>
+      `
+      : '';
 
     target.innerHTML = `
       <div class="detail-card">
         <div class="card-head">
           <div>
             <h3>${escapeHtml(permit.title)}</h3>
-            <p class="muted">${escapeHtml(permit.id)} - ${escapeHtml(permit.location)}</p>
+            <p class="muted">${escapeHtml(permit.location || '-')}</p>
           </div>
           <span class="badge ${statusBadge(permit.status)}">${formatStatus(permit.status)}</span>
         </div>
 
         <div class="review-strip">
           <div>
-            <span>Documents</span>
-            <strong>${documentCount}</strong>
-            <small>${downloadableCount} downloadable</small>
+            <span>MOS/JSA Forms</span>
+            <strong>${digitalEvidenceCount}/2</strong>
+            <small>digital evidence</small>
           </div>
           <div>
             <span>Workers</span>
@@ -1189,47 +1442,47 @@ document.addEventListener('DOMContentLoaded', () => {
 
         <div class="detail-row">
           <div><strong>Requester</strong><p class="muted">${escapeHtml(permit.requestedBy || '-')}</p></div>
-          <div><strong>Permit Type</strong><p class="muted">${escapeHtml(getPermitType(permit))}</p></div>
+          <div><strong>Work Type</strong><p class="muted">${escapeHtml(getPermitType(permit))}</p></div>
         </div>
         <div class="detail-row">
           <div><strong>Schedule</strong><p class="muted">${formatDateTime(permit.startDateTime)} to ${formatDateTime(permit.endDateTime)}</p></div>
           <div><strong>Assigned Workers</strong><p class="muted">${escapeHtml(workers)}</p></div>
         </div>
         <div class="detail-row">
-          <div><strong>Hazards</strong><p class="muted">${escapeHtml(formatList(permit.hazards))}</p></div>
-          <div><strong>Approver Route</strong><p class="muted">${escapeHtml(routeText)}</p></div>
+          <div><strong>Permit Type</strong><p class="muted">${escapeHtml(formatList(permit.hazards))}</p></div>
         </div>
-        <section class="review-block">
-          <div class="review-block-head">
-            <h4>Uploaded Documents</h4>
-            <span class="badge pending">${downloadableCount}/${documentCount || 0} files</span>
-          </div>
-          ${renderPermitDocumentCards(permit)}
-        </section>
+        ${rejectionMarkup}
+        ${renderDigitalEvidence(permit)}
+        ${renderSupportingFiles(permit)}
         <section class="review-block">
           <div class="review-block-head">
             <h4>Scope and Controls</h4>
           </div>
           <div class="detail-row">
+            <div><strong>Description</strong><p class="muted multiline">${escapeHtml(extractScope(permit.description) || permit.description || '-')}</p></div>
+          </div>
+          <div class="detail-row">
             <div><strong>Control Measures</strong><p class="muted multiline">${escapeHtml(formatList(permit.controls))}</p></div>
             <div><strong>PPE</strong><p class="muted multiline">${escapeHtml(formatList(permit.ppe))}</p></div>
           </div>
-          <p class="detail-text">${escapeHtml(extractScope(permit.description) || permit.description || '-')}</p>
         </section>
         <div class="button-row">
-          ${
-            canSubmit
-              ? '<button class="btn small" id="submitPermitButton" type="button">Submit to Approval Route</button><button class="btn small secondary" id="flagCorrectionButton" type="button">Return / Flag Correction</button>'
-              : '<span class="badge pending">Already routed to pending approval</span>'
-          }
+          ${actionMarkup}
         </div>
       </div>
     `;
 
     document.querySelector('#submitPermitButton')?.addEventListener('click', () => submitPermit(permit));
-    document.querySelector('#flagCorrectionButton')?.addEventListener('click', () => {
-      addAudit(`Flagged draft correction for ${permit.title}`, 'Pending');
-      elements.sectionStatus.textContent = 'Draft correction flag recorded. The requester keeps ownership of the draft package.';
+    target.querySelector('[data-mos-jsa-export]')?.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      downloadMosJsaExcel(permit.id)
+        .then(() => {
+          elements.sectionStatus.textContent = 'Exported MOS/JSA digital form to Excel.';
+        })
+        .catch((error) => {
+          elements.sectionStatus.textContent = error.message || 'Unable to export MOS/JSA Excel.';
+        });
     });
   }
 
@@ -1342,6 +1595,105 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function renderUserRoles(query = '') {
+    if (!elements.userRoleList) return;
+
+    const roles = state.assignableRoles.length
+      ? state.assignableRoles
+      : ['admin', 'requester', 'supervisor', 'safety_officer'];
+    const lowerQuery = query.trim().toLowerCase();
+    const users = state.users.filter((user) => {
+      const searchable = [
+        user.fullName,
+        user.email,
+        user.employeeId,
+        user.organization,
+        ...getUserRoles(user).map(roleLabel),
+      ].join(' ').toLowerCase();
+      return !lowerQuery || searchable.includes(lowerQuery);
+    });
+
+    if (elements.userRoleCount) {
+      elements.userRoleCount.textContent = `${users.length} user${users.length === 1 ? '' : 's'}`;
+    }
+
+    if (!users.length) {
+      elements.userRoleList.innerHTML = `
+        <div class="empty-state" role="status" aria-live="polite">
+          <strong>No application users found</strong>
+          <p class="muted">Create a non-worker account first, then assign access roles here.</p>
+        </div>
+      `;
+      return;
+    }
+
+    elements.userRoleList.innerHTML = users
+      .map((user) => {
+        const userRoles = getUserRoles(user);
+        const initials = (user.fullName || user.email || 'User')
+          .split(/\s+/)
+          .filter(Boolean)
+          .slice(0, 2)
+          .map((part) => part[0].toUpperCase())
+          .join('') || 'U';
+        const selectedLabels = userRoles.map(roleLabel).join(', ') || 'No role';
+        return `
+          <article class="user-role-card" data-user-id="${escapeHtml(user.id)}">
+            <div class="user-role-person">
+              <div class="admin-worker-avatar">${escapeHtml(initials)}</div>
+              <div>
+                <strong>${escapeHtml(user.fullName || 'Unnamed user')}</strong>
+                <span>${escapeHtml(user.email || user.employeeId || '-')}</span>
+                <small>${escapeHtml(user.organization || 'PTW Guardian')}</small>
+              </div>
+            </div>
+            <div class="user-role-current">
+              <span class="meta-muted">Current access</span>
+              <strong>${escapeHtml(selectedLabels)}</strong>
+            </div>
+            <div class="user-role-options">
+              ${roles.map((role) => `
+                <label class="user-role-option">
+                  <input type="checkbox" data-user-role="${escapeHtml(role)}" ${userRoles.includes(role) ? 'checked' : ''}>
+                  <span>${escapeHtml(roleLabel(role))}</span>
+                </label>
+              `).join('')}
+            </div>
+            <button class="btn small" type="button" data-user-role-save="${escapeHtml(user.id)}">Save Roles</button>
+          </article>
+        `;
+      })
+      .join('');
+  }
+
+  async function saveUserRoles(userId) {
+    const card = elements.userRoleList?.querySelector(`[data-user-id="${CSS.escape(userId)}"]`);
+    if (!card) return;
+
+    const roles = Array.from(card.querySelectorAll('[data-user-role]:checked'))
+      .map((input) => input.dataset.userRole)
+      .filter(Boolean);
+    if (!roles.length) {
+      elements.sectionStatus.textContent = 'Select at least one role for this user.';
+      return;
+    }
+
+    try {
+      const result = await apiRequest(`/api/users/${encodeURIComponent(userId)}/roles`, {
+        method: 'PATCH',
+        body: JSON.stringify({ roles }),
+      });
+      state.users = state.users.map((user) => user.id === userId ? result.user : user);
+      if (result.user?.id === state.session?.user?.id) {
+        writeSessionUser(result.user);
+      }
+      renderUserRoles(elements.searchInput?.value || '');
+      elements.sectionStatus.textContent = `Updated roles for ${result.user?.fullName || 'user'}.`;
+    } catch (error) {
+      elements.sectionStatus.textContent = error.error || 'Unable to update user roles.';
+    }
+  }
+
   function updateKpis() {
     const invalid = state.workers.filter((worker) => String(worker.status || '').toLowerCase() !== 'valid').length;
     const queue = getDraftQueue().length;
@@ -1362,8 +1714,33 @@ document.addEventListener('DOMContentLoaded', () => {
     renderWorkerRoleOptions(worker.role || '');
     setSelectedWorkerPermits(worker.permits || []);
     renderCertificationEditor(worker.certifications || []);
+    elements.addWorkerKicker.textContent = 'Edit Worker Record';
+    elements.addWorkerDialogTitle.textContent = 'Edit Worker';
+    elements.addWorkerDialogSubtitle.textContent = 'Update the worker details, permit authorizations, and competency certificates.';
+    elements.addWorkerMessage.textContent = '';
     elements.addWorkerSubmit.textContent = 'Save Worker';
-    elements.addWorkerForm.scrollIntoView({ behavior: 'smooth' });
+    if (elements.addWorkerDialog && !elements.addWorkerDialog.open) {
+      elements.addWorkerDialog.showModal();
+    }
+    window.setTimeout(() => elements.newWorkerName?.focus({ preventScroll: true }), 80);
+  }
+
+  function openAddWorkerForm() {
+    clearWorkerForm();
+    if (elements.addWorkerDialog && !elements.addWorkerDialog.open) {
+      elements.addWorkerDialog.showModal();
+    }
+    elements.sectionStatus.textContent = 'Add worker details, then save the competency record.';
+    elements.addWorkerMessage.textContent = '';
+    window.setTimeout(() => elements.newWorkerName?.focus({ preventScroll: true }), 80);
+  }
+
+  function cancelAddWorkerForm() {
+    clearWorkerForm();
+    if (elements.addWorkerDialog?.open) {
+      elements.addWorkerDialog.close();
+    }
+    elements.sectionStatus.textContent = 'Worker addition cancelled.';
   }
 
   async function deleteWorker(worker) {
@@ -1380,56 +1757,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function formatActivationDelivery(delivery) {
-    if (!delivery || !Array.isArray(delivery.channels)) {
-      return 'Delivery status unavailable.';
-    }
-
-    const sent = delivery.channels
-      .filter((channel) => channel.status === 'sent')
-      .map((channel) => channel.channel.toUpperCase());
-    const failed = delivery.channels
-      .filter((channel) => channel.status === 'failed')
-      .map((channel) => channel.channel.toUpperCase());
-    const unavailable = delivery.channels
-      .filter((channel) => channel.status === 'not_configured' || channel.status === 'skipped')
-      .map((channel) => channel.channel.toUpperCase());
-
-    if (sent.length) {
-      return `Invite sent by ${sent.join(' and ')}${failed.length ? `; ${failed.join(' and ')} failed` : ''}.`;
-    }
-
-    if (failed.length) {
-      return `Invite delivery failed by ${failed.join(' and ')}.`;
-    }
-
-    if (unavailable.length) {
-      return `Invite delivery not configured for ${unavailable.join(' and ')}.`;
-    }
-
-    return 'Invite delivery status unavailable.';
-  }
-
-  function formatActivationInviteMessage({ email, link, delivery, created }) {
-    if (!link) {
-      return `Worker account matched for ${email}. No activation invite needed.`;
-    }
-
-    const action = created ? 'created' : 'refreshed';
-    const deliveryText = formatActivationDelivery(delivery);
-    return `Worker activation invite ${action} for ${email}. ${deliveryText} Activation link: ${link}`;
-  }
-
   async function updateWorkerReviewStatus(worker, status, suppliedReviewComment) {
-    const reviewComment =
-      status === 'rejected'
-        ? suppliedReviewComment ?? prompt(`Return ${worker.name || 'worker'} for correction. Add a short reason:`) ?? ''
-        : '';
-
-    if (status === 'rejected' && !reviewComment.trim()) {
-      elements.sectionStatus.textContent = 'Return reason is required for worker correction.';
-      return;
-    }
+    const reviewComment = status === 'valid' ? '' : suppliedReviewComment || 'Deactivated by Admin';
 
     try {
       const result = await apiRequest(`/api/workers/${encodeURIComponent(worker.id)}/status`, {
@@ -1440,31 +1769,19 @@ document.addEventListener('DOMContentLoaded', () => {
       renderCompetency(elements.searchInput?.value || '');
       updateKpis();
       addAudit(
-        `${status === 'valid' ? 'Marked valid' : 'Returned'} worker profile ${worker.name}`,
+        `${status === 'valid' ? 'Marked valid' : 'Deactivated'} worker profile ${worker.name}`,
       );
       if (elements.workerReviewDialog?.open) {
         elements.workerReviewDialog.close();
       }
       if (status === 'valid' && result.workerAccount) {
-        if (result.workerAccount.created) {
-          elements.sectionStatus.textContent = formatActivationInviteMessage({
-            email: result.workerAccount.user.email,
-            link: result.workerAccount.activationLink,
-            delivery: result.workerAccount.delivery,
-            created: true,
-          });
-        } else if (result.workerAccount.skipped) {
+        if (result.workerAccount.skipped) {
           elements.sectionStatus.textContent = `Worker marked valid. Account not created: ${result.workerAccount.reason}`;
         } else {
-          elements.sectionStatus.textContent = formatActivationInviteMessage({
-            email: result.workerAccount.user.email,
-            link: result.workerAccount.activationLink,
-            delivery: result.workerAccount.delivery,
-            created: false,
-          });
+          elements.sectionStatus.textContent = `Marked valid worker profile ${worker.name}. Worker login account is active.`;
         }
       } else {
-        elements.sectionStatus.textContent = `${status === 'valid' ? 'Marked valid' : 'Returned'} worker profile ${worker.name}.`;
+        elements.sectionStatus.textContent = `${status === 'valid' ? 'Marked valid' : 'Deactivated'} worker profile ${worker.name}.`;
       }
     } catch (error) {
       elements.sectionStatus.textContent = error.error || 'Unable to review worker profile.';
@@ -1482,6 +1799,10 @@ document.addEventListener('DOMContentLoaded', () => {
     renderWorkerRoleOptions();
     setSelectedWorkerPermits([]);
     renderCertificationEditor();
+    elements.addWorkerKicker.textContent = 'Worker Record';
+    elements.addWorkerDialogTitle.textContent = 'Add Worker';
+    elements.addWorkerDialogSubtitle.textContent = 'Enter the worker details, permit authorizations, and competency certificates.';
+    elements.addWorkerMessage.textContent = '';
     elements.addWorkerSubmit.textContent = 'Add Worker';
   }
 
@@ -1491,6 +1812,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const icPassport = elements.newWorkerIcPassport.value.trim();
     if (!name || !icPassport) {
       elements.sectionStatus.textContent = 'Full name and IC/Passport number are required.';
+      elements.addWorkerMessage.textContent = 'Full name and IC/Passport number are required.';
       return;
     }
 
@@ -1524,11 +1846,15 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       clearWorkerForm();
+      if (elements.addWorkerDialog?.open) {
+        elements.addWorkerDialog.close();
+      }
       await loadData();
       renderCompetency(elements.searchInput?.value || '');
       updateKpis();
     } catch (error) {
       elements.sectionStatus.textContent = error.error || 'Unable to save worker.';
+      elements.addWorkerMessage.textContent = error.error || 'Unable to save worker.';
     }
   }
 
@@ -1536,6 +1862,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const query = elements.searchInput?.value || '';
     if (state.activeSection === 'competency') renderCompetency(query);
     if (state.activeSection === 'draftReview') renderQueue(query);
+    if (state.activeSection === 'userRoles') renderUserRoles(query);
     if (state.activeSection === 'auditTrails') renderAudit(query);
   }
 
@@ -1548,7 +1875,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function wireEvents() {
     elements.navItems.forEach((item, index) => {
-      item.dataset.section = ['competency', 'draftReview', 'auditTrails'][index];
+      item.dataset.section = ['competency', 'draftReview', 'userRoles', 'auditTrails'][index];
       item.addEventListener('click', () => setActiveSection(item.dataset.section));
     });
 
@@ -1600,7 +1927,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     elements.addWorkerForm?.addEventListener('submit', saveWorker);
     elements.addWorkerForm?.addEventListener('reset', () => window.setTimeout(clearWorkerForm, 0));
-    elements.addWorkerButton?.addEventListener('click', () => elements.newWorkerName?.focus());
+    elements.addWorkerButton?.addEventListener('click', openAddWorkerForm);
+    elements.cancelAddWorkerButton?.addEventListener('click', cancelAddWorkerForm);
+    document.querySelectorAll('[data-close-add-worker]').forEach((button) => {
+      button.addEventListener('click', cancelAddWorkerForm);
+    });
     elements.addCertificationButton?.addEventListener('click', () => addCertificationRow());
     document.querySelectorAll('[data-close-worker-review]').forEach((button) => {
       button.addEventListener('click', () => elements.workerReviewDialog?.close());
@@ -1619,6 +1950,18 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     [elements.queueDetail, elements.routingDetail].forEach((detail) => {
       detail?.addEventListener('click', (event) => {
+        const exportButton = event.target.closest('[data-mos-jsa-export]');
+        if (exportButton) {
+          downloadMosJsaExcel(exportButton.dataset.mosJsaExport)
+            .then(() => {
+              elements.sectionStatus.textContent = 'Exported MOS/JSA digital form to Excel.';
+            })
+            .catch((error) => {
+              elements.sectionStatus.textContent = error.message || 'Unable to export MOS/JSA Excel.';
+            });
+          return;
+        }
+
         const button = event.target.closest('[data-permit-document-download]');
         if (!button) return;
 
@@ -1639,10 +1982,10 @@ document.addEventListener('DOMContentLoaded', () => {
       const worker = getWorkerRecord(state.activeReviewWorkerId);
       if (worker) updateWorkerReviewStatus(worker, 'valid');
     });
-    elements.returnWorkerButton?.addEventListener('click', () => {
-      const worker = getWorkerRecord(state.activeReviewWorkerId);
-      if (!worker) return;
-      updateWorkerReviewStatus(worker, 'rejected', elements.workerReturnReason?.value || '');
+    elements.userRoleList?.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-user-role-save]');
+      if (!button) return;
+      saveUserRoles(button.dataset.userRoleSave);
     });
     elements.newWorkerCertifications?.addEventListener('click', (event) => {
       const removeButton = event.target.closest('[data-cert-remove]');
@@ -1686,6 +2029,7 @@ document.addEventListener('DOMContentLoaded', () => {
     await loadData();
     updateKpis();
     renderCompetency();
+    renderUserRoles();
     renderAudit();
     setActiveSection(getDraftQueue().length ? 'draftReview' : state.activeSection);
     if (state.activeSection !== 'draftReview') {

@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const WORK_STATE_STORAGE_KEY = 'ptwSupervisorWorkStates';
   const DECISION_STORAGE_KEY = 'ptwSupervisorPermitDecisions';
   const EXTENSION_STORAGE_KEY = 'ptwSupervisorWorkerExtensionRequests';
+  const SITE_VALIDATION_STORAGE_KEY = 'ptwSupervisorSiteValidationChecklists';
 
   const elements = {
     mainPanel: document.querySelector('.main-panel'),
@@ -52,11 +53,17 @@ document.addEventListener('DOMContentLoaded', () => {
     extensionList: document.querySelector('#extensionList'),
     extensionDialog: document.querySelector('#extensionDialog'),
     extensionDialogContent: document.querySelector('#extensionDialogContent'),
+    siteChecklistDialog: document.querySelector('#siteChecklistDialog'),
+    siteChecklistDialogContent: document.querySelector('#siteChecklistDialogContent'),
     supportButton: document.querySelector('#supportButton'),
     profileButton: document.querySelector('#profileButton'),
     profileName: document.querySelector('#profileName'),
     profileRole: document.querySelector('#profileRole'),
     profileAvatar: document.querySelector('#profileAvatar'),
+    reviewProfileName: document.querySelector('#reviewProfileName'),
+    reviewProfileRole: document.querySelector('#reviewProfileRole'),
+    reviewProfileAvatar: document.querySelector('#reviewProfileAvatar'),
+    reviewNotificationButton: document.querySelector('#reviewNotificationButton'),
     notificationButton: document.querySelector('#notificationButton'),
     notificationPanel: document.querySelector('#notificationPanel'),
     notificationCloseButton: document.querySelector('#notificationCloseButton'),
@@ -80,6 +87,36 @@ document.addEventListener('DOMContentLoaded', () => {
     workStates: readStoredObject(WORK_STATE_STORAGE_KEY),
     permitDecisions: readStoredObject(DECISION_STORAGE_KEY),
     extensionDecisions: readStoredObject(EXTENSION_STORAGE_KEY),
+    siteValidationChecklists: readStoredObject(SITE_VALIDATION_STORAGE_KEY),
+  };
+
+  const digitalDocumentLabels = {
+    MOS: {
+      title: 'MOS Digital Form',
+      fields: {
+        workTitle: 'Work Title',
+        workLocation: 'Work Location',
+        scope: 'Scope of Work',
+        methodSteps: 'Method Steps',
+        toolsEquipment: 'Tools / Equipment',
+        materials: 'Materials / Chemicals',
+        isolations: 'Isolation / Preparation',
+        responsiblePerson: 'Responsible Person',
+        emergencyArrangement: 'Emergency Arrangement',
+      },
+    },
+    JSA: {
+      title: 'JSA Digital Form',
+      fields: {
+        taskStep: 'Task Step / Activity',
+        permitTypeHazards: 'Permit Type / Hazard',
+        potentialConsequence: 'Potential Consequence',
+        controlMeasures: 'Control Measures',
+        requiredPpe: 'Required PPE',
+        responsiblePerson: 'Responsible Person',
+        residualRisk: 'Residual Risk',
+      },
+    },
   };
 
   const API_BASE = window.location.protocol === 'file:' ? 'http://localhost:3000' : '';
@@ -87,9 +124,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const metricPages = {
     pending: {
       title: 'Pending Approvals',
-      text: 'Safety verified permits awaiting supervisor final approval.',
+      text: 'Permits awaiting Supervisor Permit Approval or final release.',
       empty: 'No pending approvals',
-      getPermits: () => commandPermits().filter((permit) => permit.status === 'approved'),
+      getPermits: () => commandPermits().filter((permit) => ['stage1_complete', 'approved'].includes(permit.status)),
     },
     approved: {
       title: 'Approved Permits',
@@ -157,15 +194,39 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/'/g, '&#039;');
   }
 
+  function getUserRoles(user) {
+    const roles = Array.isArray(user?.roles) ? user.roles : [user?.role];
+    return roles
+      .map((role) => String(role || '').toLowerCase())
+      .map((role) => role === 'approver' ? 'supervisor' : role)
+      .filter(Boolean)
+      .filter((role, index, list) => list.indexOf(role) === index);
+  }
+
+  function userHasRole(user, role) {
+    return getUserRoles(user).includes(role);
+  }
+
+  function userHasAnyRole(user, roles) {
+    return roles.some((role) => userHasRole(user, role));
+  }
+
   function updateProfile(user) {
     const name = user?.fullName || user?.email || 'Supervisor';
+    const roleLabel = 'Supervisor';
     elements.profileName.textContent = name;
-    elements.profileRole.textContent = user?.role === 'approver' ? 'Approver' : 'Supervisor';
+    elements.profileRole.textContent = roleLabel;
     if (user?.profilePictureUrl) {
       elements.profileAvatar.innerHTML = `<img src="${escapeAttribute(user.profilePictureUrl)}" alt="">`;
+      if (elements.reviewProfileAvatar) {
+        elements.reviewProfileAvatar.innerHTML = `<img src="${escapeAttribute(user.profilePictureUrl)}" alt="">`;
+      }
     } else {
       elements.profileAvatar.textContent = initials(name);
+      if (elements.reviewProfileAvatar) elements.reviewProfileAvatar.textContent = initials(name);
     }
+    if (elements.reviewProfileName) elements.reviewProfileName.textContent = name;
+    if (elements.reviewProfileRole) elements.reviewProfileRole.textContent = roleLabel;
   }
 
   async function refreshCurrentUser() {
@@ -181,7 +242,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function supervisorNotificationItems() {
-    const pending = commandPermits().filter((permit) => permit.status === 'approved').length;
+    const pending = commandPermits().filter((permit) => ['stage1_complete', 'approved'].includes(permit.status)).length;
     const active = state.permits.filter((permit) => permit.status === 'active' && !permit.isEmergency).length;
     const extensions = Object.values(state.extensionDecisions || {}).length;
     return [
@@ -189,7 +250,7 @@ document.addEventListener('DOMContentLoaded', () => {
         view: 'dashboard',
         label: 'Approvals',
         title: `${pending} permit${pending === 1 ? '' : 's'} awaiting approval`,
-        body: 'Review Safety verified permits before work release.',
+        body: 'Review permits ready for Permit Approval or work release.',
       },
       {
         view: 'monitoring',
@@ -316,6 +377,9 @@ document.addEventListener('DOMContentLoaded', () => {
       documents: Array.isArray(permit.documents) ? permit.documents : [],
       assignedWorkers: Array.isArray(permit.assignedWorkers) ? permit.assignedWorkers : [],
       approvers: Array.isArray(permit.approvers) ? permit.approvers : [],
+      siteValidation: permit.siteValidation && typeof permit.siteValidation === 'object' && !Array.isArray(permit.siteValidation)
+        ? permit.siteValidation
+        : {},
     };
   }
 
@@ -346,8 +410,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function requireSupervisorAccess() {
-    const role = state.session?.user?.role;
-    if (SUPERVISOR_ACCESS_ROLES.has(role)) {
+    if (userHasAnyRole(state.session?.user, Array.from(SUPERVISOR_ACCESS_ROLES))) {
       elements.authWarning.classList.add('hidden');
       elements.dashboardView.classList.remove('hidden');
       updateProfile(state.session.user);
@@ -369,6 +432,16 @@ document.addEventListener('DOMContentLoaded', () => {
     ]);
 
     state.permits = (permitResult.permits || permitResult.data || []).map(normalizePermit);
+    state.siteValidationChecklists = {
+      ...state.siteValidationChecklists,
+      ...state.permits.reduce((records, permit) => {
+        if (permit.siteValidation && Object.keys(permit.siteValidation).length) {
+          records[permit.id] = permit.siteValidation;
+        }
+        return records;
+      }, {}),
+    };
+    persistStoredObject(SITE_VALIDATION_STORAGE_KEY, state.siteValidationChecklists);
     state.workers = workerResult.workers || workerResult.data || [];
     state.notifications = notificationResult.notifications || notificationResult.data || [];
     state.extensionDecisions = {
@@ -391,7 +464,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function extractPermitType(permit) {
     if (permit.workType) return permit.workType;
     const match = String(permit.description || '').match(/Permit Type:\s*([^\n]+)/i);
-    return match ? match[1].trim() : 'General Maintenance';
+    return match ? match[1].trim() : 'Preventive Maintenance';
   }
 
   function cleanTitle(permit) {
@@ -399,9 +472,15 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function cleanDescription(permit) {
-    return String(permit.description || '-')
-      .replace(/Permit Type:\s*[^\n]+/ig, '')
-      .replace(/\n{2,}/g, '\n')
+    return String(permit.description || '')
+      .split('\n')
+      .filter((line) => !/^Permit Class:/i.test(line.trim()))
+      .filter((line) => !/^Review Route:/i.test(line.trim()))
+      .filter((line) => !/^Permit Type:/i.test(line.trim()))
+      .filter((line) => !/^Assigned Worker/i.test(line.trim()))
+      .filter((line) => !/^Required Documents:/i.test(line.trim()))
+      .filter((line) => !/^(HIRARC|MOS|JSA):/i.test(line.trim()))
+      .join('\n')
       .trim() || '-';
   }
 
@@ -419,6 +498,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function formatQueueStatus(permit) {
+    if (permit.status === 'stage1_complete') return { label: 'Permit Approval', className: 'pending' };
     if (permit.status === 'approved') return { label: 'Pending Final Approval', className: 'pending' };
     if (permit.status === 'rejected') {
       const outcome = state.permitDecisions[permit.id]?.outcome;
@@ -465,6 +545,11 @@ document.addEventListener('DOMContentLoaded', () => {
     return Math.max(0, end.getTime() - Date.now());
   }
 
+  function isPermitExpired(permit) {
+    const end = new Date(permit.endDateTime);
+    return !Number.isNaN(end.getTime()) && end.getTime() <= Date.now();
+  }
+
   function formatRemaining(permit) {
     const ms = remainingMs(permit);
     const totalSeconds = Math.floor(ms / 1000);
@@ -472,6 +557,55 @@ document.addEventListener('DOMContentLoaded', () => {
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = totalSeconds % 60;
     return [hours, minutes, seconds].map((part) => String(part).padStart(2, '0')).join(':');
+  }
+
+  function liveTimerElements() {
+    return Array.from(document.querySelectorAll('[data-countdown-permit-id]'));
+  }
+
+  function updateLiveTimers() {
+    liveTimerElements().forEach((element) => {
+      const permit = state.permits.find((item) => item.id === element.dataset.countdownPermitId);
+      if (!permit) return;
+
+      const expired = isPermitExpired(permit);
+      const remaining = formatRemaining(permit);
+      const timeClass = expired ? 'danger' : isDueWithin(permit, 1) ? 'danger' : isDueWithin(permit, 2) ? 'warning' : '';
+
+      if (element.dataset.countdownValue === 'true') {
+        element.textContent = remaining;
+        element.classList.toggle('danger', timeClass === 'danger');
+        element.classList.toggle('warning', timeClass === 'warning');
+      }
+
+      if (element.dataset.countdownBox === 'true') {
+        element.classList.toggle('expired', expired);
+        const label = element.querySelector('[data-countdown-label]');
+        if (label) label.textContent = expired ? 'Window Expired' : 'Time Remaining';
+        const note = element.querySelector('[data-countdown-expired-note]');
+        if (note) note.hidden = !expired;
+      }
+    });
+
+    document.querySelectorAll('[data-progress-permit-id]').forEach((bar) => {
+      const permit = state.permits.find((item) => item.id === bar.dataset.progressPermitId);
+      if (!permit) return;
+      bar.style.width = `${remainingProgress(permit)}%`;
+      const wrapper = bar.closest('.validity-bar');
+      if (wrapper) {
+        const expired = isPermitExpired(permit);
+        wrapper.classList.toggle('danger', expired || isDueWithin(permit, 1));
+        wrapper.classList.toggle('warning', !expired && !isDueWithin(permit, 1) && isDueWithin(permit, 2));
+      }
+    });
+
+    const permit = state.permits.find((item) => item.id === state.reviewPermitId);
+    const releaseButton = document.querySelector('[data-live-release-button="true"]');
+    if (permit && releaseButton && permit.status === 'approved' && isPermitExpired(permit)) {
+      releaseButton.disabled = true;
+      releaseButton.textContent = 'Expired';
+      releaseButton.title = 'Permit window expired. Return/reschedule or approve an extension before release.';
+    }
   }
 
   function remainingProgress(permit) {
@@ -483,7 +617,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function commandPermits() {
-    const commandStatuses = new Set(['approved', 'active', 'rejected']);
+    const commandStatuses = new Set(['stage1_complete', 'approved', 'active', 'rejected']);
     return state.permits.filter((permit) => !permit.isEmergency && commandStatuses.has(permit.status));
   }
 
@@ -728,11 +862,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const workState = getWorkState(permit);
     const held = workState === 'held';
     const stopped = workState === 'stopped';
-    const timeClass = isDueWithin(permit, 1) ? 'danger' : isDueWithin(permit, 2) ? 'warning' : '';
+    const expired = isPermitExpired(permit);
+    const timeClass = expired ? 'danger' : isDueWithin(permit, 1) ? 'danger' : isDueWithin(permit, 2) ? 'warning' : '';
     const progressStyle = `width:${remainingProgress(permit)}%`;
     const actions = stage === 'approved'
       ? `
-        <button class="execution-button success" type="button" data-work-id="${escapeHtml(permit.id)}">Work</button>
+        <button class="execution-button success" type="button" data-work-id="${escapeHtml(permit.id)}">${expired ? 'Expired' : 'Work'}</button>
         <button class="execution-button" type="button" data-review-id="${escapeHtml(permit.id)}">Review</button>
       `
       : `
@@ -758,9 +893,10 @@ document.addEventListener('DOMContentLoaded', () => {
           <span class="risk-pill ${escapeHtml(risk.className)}">${escapeHtml(risk.label)}</span>
           <div class="validity-row">
             <span>${stage === 'approved' ? 'Validation Window' : 'Validity Remaining'}</span>
-            <strong class="${timeClass}">${escapeHtml(formatRemaining(permit))}</strong>
+            <strong class="${timeClass}" data-countdown-permit-id="${escapeHtml(permit.id)}" data-countdown-value="true">${escapeHtml(formatRemaining(permit))}</strong>
           </div>
-          <div class="validity-bar ${timeClass}"><span style="${progressStyle}"></span></div>
+          <div class="validity-bar ${timeClass}"><span data-progress-permit-id="${escapeHtml(permit.id)}" style="${progressStyle}"></span></div>
+          ${expired && stage === 'approved' ? '<div class="hold-banner danger">Permit window expired. Return for reschedule or approve an extension before release.</div>' : ''}
           <div class="work-state-line ${escapeHtml(workState)}">
             <span>Work Status</span>
             <strong>${escapeHtml(formatWorkState(workState))}</strong>
@@ -1072,6 +1208,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const risk = classifyRisk(permit);
     const status = formatQueueStatus(permit);
+    const expired = isPermitExpired(permit);
+    const decisionCopy = permit.status === 'stage1_complete'
+      ? `Permit Approval review for #${escapeHtml(displayPermitId(permit))}.`
+      : expired && permit.status === 'approved'
+        ? `Permit window expired for #${escapeHtml(displayPermitId(permit))}. Return/reschedule or approve an extension before release.`
+        : `Work release verification for #${escapeHtml(displayPermitId(permit))}.`;
     elements.permitReviewContent.innerHTML = `
       <article class="permit-hero">
         <div>
@@ -1088,9 +1230,10 @@ document.addEventListener('DOMContentLoaded', () => {
             <span class="status-line">Status: ${escapeHtml(status.label)}</span>
           </div>
         </div>
-        <div class="time-box">
-          <span>Time Remaining</span>
-          <strong>${escapeHtml(formatRemaining(permit))}</strong>
+        <div class="time-box ${expired ? 'expired' : ''}" data-countdown-permit-id="${escapeHtml(permit.id)}" data-countdown-box="true">
+          <span data-countdown-label>${expired ? 'Window Expired' : 'Time Remaining'}</span>
+          <strong data-countdown-permit-id="${escapeHtml(permit.id)}" data-countdown-value="true">${escapeHtml(formatRemaining(permit))}</strong>
+          <em data-countdown-expired-note ${expired ? '' : 'hidden'}>Release blocked</em>
         </div>
       </article>
 
@@ -1104,39 +1247,11 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="section-rule"></div>
             <span class="section-label">Detailed Description</span>
             <p class="description-text">${escapeHtml(cleanDescription(permit))}</p>
-            <div class="info-split">
-              <div class="info-box">
-                <span>Method Statement (MOS)</span>
-                <p>${escapeHtml(methodStatementText(permit))}</p>
-                <button class="text-link" type="button" data-toast="Full MOS preview is ready.">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5c5.2 0 9.2 5.1 9.8 5.9l.8 1.1-.8 1.1C21.2 13.9 17.2 19 12 19s-9.2-5.1-9.8-5.9L1.4 12l.8-1.1C2.8 10.1 6.8 5 12 5Zm0 2C7.9 7 4.5 10.8 3.9 12c.6 1.2 4 5 8.1 5s7.5-3.8 8.1-5C19.5 10.8 16.1 7 12 7Zm0 2.2A2.8 2.8 0 1 1 12 14.8 2.8 2.8 0 0 1 12 9.2Z"/></svg>
-                  View Full MOS
-                </button>
-              </div>
-              <div class="info-box">
-                <span>Documents (HIRARC/JSA)</span>
-                <div class="document-list">
-                  ${renderDocumentRows(permit)}
-                </div>
-              </div>
-            </div>
+            ${renderDigitalEvidence(permit)}
+            ${renderSupportingDocuments(permit)}
           </section>
 
-          <section class="review-panel">
-            <h2>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3Zm0 2.2 6 2.2V11c0 3.8-2.4 7.4-6 8.8A9.7 9.7 0 0 1 6 11V6.4l6-2.2Z"/></svg>
-              Hazard Controls & Mitigation
-            </h2>
-            <div class="section-rule"></div>
-            <div class="hazard-table">
-              <div class="hazard-head">
-                <span>Hazard Type</span>
-                <span>Control Measure</span>
-                <span>Verification</span>
-              </div>
-              ${renderHazardRows(permit)}
-            </div>
-          </section>
+          ${permit.status === 'stage1_complete' ? renderPermitApprovalValidation(permit) : ''}
 
           <section class="review-panel">
             <h2>
@@ -1175,7 +1290,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="review-decision-bar">
         <div class="certify-copy">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3Zm0 2.2 6 2.2V11c0 3.8-2.4 7.4-6 8.8A9.7 9.7 0 0 1 6 11V6.4l6-2.2Z"/></svg>
-          <span>Safety measures verified for #${escapeHtml(displayPermitId(permit))}.</span>
+          <span>${decisionCopy}</span>
         </div>
         <div class="decision-actions">
           ${renderReviewActions(permit)}
@@ -1186,6 +1301,15 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.permitReviewContent.querySelectorAll('[data-decision]').forEach((button) => {
       button.addEventListener('click', () => applyStatusFromReview(permit, button.dataset.decision));
     });
+    elements.permitReviewContent.querySelectorAll('[data-site-checklist]').forEach((button) => {
+      button.addEventListener('click', () => openSiteChecklistDialog(permit, button.dataset.siteChecklist));
+    });
+    elements.permitReviewContent.querySelector('[data-mos-jsa-export]')?.addEventListener('click', (event) => {
+      event.preventDefault();
+      downloadMosJsaExcel(permit).catch((error) => {
+        showToast(error.error || error.message || 'Unable to export MOS/JSA Excel.');
+      });
+    });
     elements.permitReviewContent.querySelectorAll('[data-document-download]').forEach((button) => {
       button.addEventListener('click', () => downloadPermitDocument(permit, button.dataset.documentDownload));
     });
@@ -1194,25 +1318,120 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function methodStatementText(permit) {
-    const controls = (permit.controls || []).filter(Boolean).slice(0, 2).join(', ');
-    if (controls) return `Work must follow approved controls: ${controls}. Continuous supervisor verification is required.`;
-    return 'Standard permit method statement applies with continuous site supervision and verified hazard controls.';
+  function normalizeStructuredData(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+
+    return Object.entries(value).reduce((normalized, [key, rawValue]) => {
+      const cleanKey = String(key || '').trim();
+      if (!cleanKey) return normalized;
+
+      if (Array.isArray(rawValue)) {
+        const items = rawValue.map((item) => String(item || '').trim()).filter(Boolean);
+        if (items.length) normalized[cleanKey] = items.join('\n');
+        return normalized;
+      }
+
+      const cleanValue = String(rawValue || '').trim();
+      if (cleanValue) normalized[cleanKey] = cleanValue;
+      return normalized;
+    }, {});
+  }
+
+  function getStructuredDocument(permit, type) {
+    return (permit.documents || []).find((document) => {
+      const documentType = String(document?.type || '').trim().toUpperCase();
+      const structuredData = normalizeStructuredData(document?.structuredData);
+      return documentType === type && Object.keys(structuredData).length;
+    }) || null;
+  }
+
+  function renderDigitalEvidence(permit) {
+    const documents = ['MOS', 'JSA']
+      .map((type) => getStructuredDocument(permit, type))
+      .filter(Boolean);
+
+    if (!documents.length) {
+      return `
+        <div class="digital-evidence-empty">
+          <strong>MOS / JSA Digital Evidence</strong>
+          <span>No MOS/JSA digital form data is available.</span>
+        </div>
+      `;
+    }
+
+    return `
+      <section class="digital-evidence-section">
+        <div class="digital-evidence-title">
+          <span>MOS / JSA Digital Evidence</span>
+          <button class="outline-button compact" type="button" data-mos-jsa-export="${escapeHtml(permit.id)}">Export Excel</button>
+        </div>
+        <div class="digital-evidence-grid">
+          ${documents.map((document) => renderStructuredDocument(document)).join('')}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderStructuredDocument(document) {
+    const type = String(document.type || '').trim().toUpperCase();
+    const schema = digitalDocumentLabels[type] || { title: `${type} Digital Form`, fields: {} };
+    const data = normalizeStructuredData(document.structuredData);
+    const knownRows = Object.entries(schema.fields)
+      .map(([key, label]) => [label, data[key]])
+      .filter(([, value]) => value);
+    const extraRows = Object.entries(data)
+      .filter(([key]) => !schema.fields[key])
+      .map(([key, value]) => [formatFieldLabel(key), value]);
+
+    return `
+      <article class="digital-evidence-card">
+        <div class="digital-evidence-head">
+          <strong>${escapeHtml(schema.title)}</strong>
+          <span>${escapeHtml(document.source === 'mos-jsa-digital-form' ? 'Digital form' : document.source || 'Structured data')}</span>
+        </div>
+        <dl>
+          ${[...knownRows, ...extraRows]
+            .map(
+              ([label, value]) => `
+                <div>
+                  <dt>${escapeHtml(label)}</dt>
+                  <dd>${escapeHtml(value)}</dd>
+                </div>
+              `,
+            )
+            .join('')}
+        </dl>
+      </article>
+    `;
+  }
+
+  function formatFieldLabel(key) {
+    return String(key || '')
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/[_-]+/g, ' ')
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+
+  function renderSupportingDocuments(permit) {
+    const rows = renderDocumentRows(permit);
+    if (!rows) return '';
+
+    return `
+      <div class="info-box supporting-documents">
+        <span>Supporting Files</span>
+        <div class="document-list">${rows}</div>
+      </div>
+    `;
   }
 
   function renderDocumentRows(permit) {
-    const documents = permit.documents?.length
-      ? permit.documents
-      : [
-        { id: 'fallback-jsa', name: 'JSA_Permit.pdf', type: 'JSA' },
-        { id: 'fallback-hirarc', name: 'HIRARC_Checklist.pdf', type: 'HIRARC' },
-      ];
+    const documents = (permit.documents || []).filter((document) => document.id && document.hasAttachment);
+    if (!documents.length) return '';
 
     return documents.map((document) => {
       const name = document.fileName || document.name || document.type || 'Permit Document';
-      const hasDownload = document.id && document.hasAttachment;
       return `
-        <button class="document-row" type="button" ${hasDownload ? `data-document-download="${escapeHtml(document.id)}"` : 'data-toast="Document preview is available in the source permit."'}>
+        <button class="document-row" type="button" data-document-download="${escapeHtml(document.id)}">
           <span class="pdf-icon">PDF</span>
           <strong>${escapeHtml(name)}</strong>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4h2v8l3-3 1.4 1.4L12 15.8l-5.4-5.4L8 9l3 3V4ZM5 18h14v2H5v-2Z"/></svg>
@@ -1221,22 +1440,367 @@ document.addEventListener('DOMContentLoaded', () => {
     }).join('');
   }
 
-  function renderHazardRows(permit) {
-    const hazards = permit.hazards.length ? permit.hazards : ['Fire / Explosion', 'Toxic Gas (H2S)', 'Working at Height'];
-    const controls = permit.controls.length ? permit.controls : [
-      'Fire blanket isolation and extinguisher readiness on site',
-      'Continuous multi-gas detector at the point of work',
-      'Certified access system and body harness verification',
-    ];
-    const tones = ['red', 'amber', 'blue'];
+  function renderPermitApprovalValidation(permit) {
+    const checklists = getSiteValidationChecklists(permit);
+    const completedCount = checklists.filter((checklist) => isSiteChecklistComplete(permit.id, checklist)).length;
+    return `
+      <section class="review-panel">
+        <h2>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5V3Zm2 2v14h10V5H7Zm2 4 1.4-1.4 1.6 1.6 3.6-3.6L17 7l-5 5-3-3Zm0 6h6v2H9v-2Z"/></svg>
+          Permit Approval Site Validation
+        </h2>
+        <div class="section-rule"></div>
+        <div class="site-validation-grid">
+          <label>
+            <span>Actual work date</span>
+            <input type="date" value="${escapeHtml(formatDateInput(permit.startDateTime))}">
+          </label>
+          <label>
+            <span>Actual location</span>
+            <input type="text" value="${escapeHtml(permit.location || '')}">
+          </label>
+          <label class="wide">
+            <span>Attendance</span>
+            <input type="text" value="${escapeHtml((permit.assignedWorkers || []).join(', '))}">
+          </label>
+        </div>
+        <div class="site-validation-summary">
+          <strong>${completedCount}/${checklists.length} checklists completed</strong>
+          <span>Open each required checklist and verify every item before approval.</span>
+        </div>
+        <div class="site-checklist-grid">
+          ${checklists.map((checklist) => siteChecklistCard(permit.id, checklist)).join('')}
+        </div>
+      </section>
+    `;
+  }
 
-    return hazards.slice(0, 5).map((hazard, index) => `
-      <div class="hazard-row">
-        <span><i class="hazard-dot ${tones[index % tones.length]}"></i>${escapeHtml(hazard)}</span>
-        <span>${escapeHtml(controls[index] || controls[0] || 'Verified control measure in place')}</span>
-        <strong>Verified</strong>
+  function siteChecklistCard(permitId, checklist) {
+    const completed = isSiteChecklistComplete(permitId, checklist);
+    const checkedCount = getCheckedSiteChecklistCount(permitId, checklist);
+    return `
+      <button class="site-checklist-card ${completed ? 'complete' : ''}" type="button" data-site-checklist="${escapeHtml(checklist.key)}">
+        <span>
+          <strong>${escapeHtml(checklist.title)}</strong>
+          <em>${escapeHtml(checklist.summary)}</em>
+        </span>
+        <b>
+          <small>${completed ? 'Review' : 'Open'}</small>
+          ${completed ? 'Complete' : `${checkedCount}/${checklist.items.length}`}
+        </b>
+      </button>
+    `;
+  }
+
+  function getSiteValidationChecklists(permit) {
+    const text = getPermitValidationText(permit);
+    const checklists = [
+      {
+        key: 'work-readiness',
+        title: 'Work Readiness',
+        summary: 'Date, location, attendance, TBT, and nearby activity check',
+        items: [
+          'Actual work date matches approved permit window',
+          'Actual work location matches the permit location',
+          'All assigned workers are present and fit for work',
+          'Toolbox talk completed for today before work starts',
+          'Nearby simultaneous work checked for conflict',
+        ],
+      },
+      {
+        key: 'ppe',
+        title: 'PPE',
+        summary: 'Required PPE is available, worn, and fit for use',
+        items: buildPpeChecklistItems(permit),
+      },
+    ];
+
+    if (/hot\s*work|welding|cutting|grinding|spark|flame/i.test(text)) {
+      checklists.push({
+        key: 'hot-work',
+        title: 'Hot Work',
+        summary: 'Fire prevention, gas test, fire watch, and spark control',
+        items: [
+          'Combustible materials removed or protected from the hot work area',
+          'Fire extinguisher or hose reel available at the work front',
+          'Fire watch assigned and briefed on stop-work authority',
+          'Gas test completed and reading is within safe limit',
+          'Drains, vents, openings, and lower levels protected from sparks',
+          'Hot work equipment, cables, and hoses inspected before use',
+        ],
+      });
+    }
+
+    if (/loto|lock\s*out|tag\s*out|isolation|isolat|electrical|energ/i.test(text)) {
+      checklists.push({
+        key: 'loto',
+        title: 'LOTO / Isolation',
+        summary: 'Energy sources isolated, locked, tagged, and verified',
+        items: [
+          'All energy sources and isolation points identified',
+          'Lock and tag applied by authorized person',
+          'Stored energy released, drained, discharged, or restrained',
+          'Zero-energy verification completed before work starts',
+          'Try-start or test-before-touch completed where applicable',
+          'Isolation register or LOTO record matches the work scope',
+        ],
+      });
+    }
+
+    if (/confined\s*space|tank|vessel|manhole|pit/i.test(text)) {
+      checklists.push({
+        key: 'confined-space',
+        title: 'Confined Space',
+        summary: 'Entry control, gas test, ventilation, standby, and rescue',
+        items: [
+          'Entry point controlled and entrant list ready',
+          'Gas test completed for oxygen, flammable gas, and toxic gas',
+          'Ventilation running and suitable for the space',
+          'Standby person assigned outside the space',
+          'Rescue equipment and emergency response route ready',
+          'Communication method between entrant and standby confirmed',
+        ],
+      });
+    }
+
+    if (/height|scaffold|ladder|roof|harness|lanyard/i.test(text)) {
+      checklists.push({
+        key: 'work-at-height',
+        title: 'Work at Height',
+        summary: 'Access, fall protection, anchor points, and exclusion zone',
+        items: [
+          'Scaffold, ladder, or access platform inspected before use',
+          'Harness and lanyard inspected and worn correctly',
+          'Anchor point is suitable and located above the worker where practical',
+          'Tools and materials secured against falling objects',
+          'Drop zone or barricade established below the work area',
+          'Weather and surface conditions are safe for height work',
+        ],
+      });
+    }
+
+    if (/chemical|solvent|acid|alkali|sds|spill/i.test(text)) {
+      checklists.push({
+        key: 'chemical',
+        title: 'Chemical Controls',
+        summary: 'SDS, handling controls, spill response, and chemical PPE',
+        items: [
+          'SDS available and reviewed by the work team',
+          'Chemical containers labelled and compatible with the work',
+          'Spill kit, eyewash, or emergency shower available as required',
+          'Chemical-resistant PPE selected and inspected',
+          'Ventilation or containment controls ready before handling',
+          'Waste and contaminated material disposal method confirmed',
+        ],
+      });
+    }
+
+    if (/lifting|crane|hoist|rigging|sling|forklift/i.test(text)) {
+      checklists.push({
+        key: 'lifting',
+        title: 'Lifting',
+        summary: 'Lifting plan, rigging, exclusion zone, and communication',
+        items: [
+          'Lifting plan or method confirmed for the load',
+          'Crane, hoist, forklift, or lifting device inspected',
+          'Slings, shackles, hooks, and lifting accessories certified and inspected',
+          'Load weight and lifting points confirmed',
+          'Exclusion zone established and controlled',
+          'Signal person or communication method confirmed',
+        ],
+      });
+    }
+
+    return checklists;
+  }
+
+  function buildPpeChecklistItems(permit) {
+    const ppe = Array.isArray(permit.ppe) ? permit.ppe.map((item) => String(item || '').trim()).filter(Boolean) : [];
+    const listedPpe = ppe.length ? ppe : ['Required PPE'];
+    return [
+      ...listedPpe.map((item) => `${item} available, worn, and fit for use`),
+      'Damaged or expired PPE removed from use',
+      'PPE matches the work method and site conditions',
+    ];
+  }
+
+  function getPermitValidationText(permit) {
+    const documentData = (permit.documents || [])
+      .map((document) => Object.values(normalizeStructuredData(document.structuredData || {})).join(' '))
+      .join(' ');
+    return [
+      permit.title,
+      permit.workType,
+      permit.description,
+      ...(permit.hazards || []),
+      ...(permit.controls || []),
+      ...(permit.ppe || []),
+      documentData,
+    ].join(' ');
+  }
+
+  function getSiteChecklistState(permitId, checklistKey) {
+    const permit = state.permits.find((item) => item.id === permitId);
+    return state.siteValidationChecklists?.[permitId]?.[checklistKey] || permit?.siteValidation?.[checklistKey] || { checked: {}, notes: '' };
+  }
+
+  function updatePermitSiteValidationState(permitId, siteValidation) {
+    state.permits = state.permits.map((permit) =>
+      permit.id === permitId ? { ...permit, siteValidation } : permit,
+    );
+  }
+
+  async function saveSiteValidationToServer(permit, siteValidation = state.siteValidationChecklists[permit.id] || {}) {
+    const result = await apiRequest(`/api/permits/${encodeURIComponent(permit.id)}/site-validation`, {
+      method: 'PATCH',
+      body: JSON.stringify({ siteValidation }),
+    });
+    const normalizedPermit = normalizePermit(result.permit || { ...permit, siteValidation: result.siteValidation || siteValidation });
+    state.siteValidationChecklists[permit.id] = normalizedPermit.siteValidation || result.siteValidation || siteValidation;
+    updatePermitSiteValidationState(permit.id, state.siteValidationChecklists[permit.id]);
+    persistStoredObject(SITE_VALIDATION_STORAGE_KEY, state.siteValidationChecklists);
+    return normalizedPermit;
+  }
+
+  function getCheckedSiteChecklistCount(permitId, checklist) {
+    const checklistState = getSiteChecklistState(permitId, checklist.key);
+    return checklist.items.filter((item) => checklistState.checked?.[checklistItemId(item)]).length;
+  }
+
+  function isSiteChecklistComplete(permitId, checklist) {
+    return checklist.items.length > 0 && getCheckedSiteChecklistCount(permitId, checklist) === checklist.items.length;
+  }
+
+  function checklistItemId(item) {
+    return String(item || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  }
+
+  function ensureSiteChecklistDialog() {
+    if (elements.siteChecklistDialog && elements.siteChecklistDialogContent) return true;
+
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      `
+        <dialog class="site-checklist-dialog" id="siteChecklistDialog">
+          <form method="dialog">
+            <button class="dialog-close" value="cancel" aria-label="Close site validation checklist">x</button>
+          </form>
+          <div class="site-checklist-dialog-content" id="siteChecklistDialogContent"></div>
+        </dialog>
+      `,
+    );
+    elements.siteChecklistDialog = document.querySelector('#siteChecklistDialog');
+    elements.siteChecklistDialogContent = document.querySelector('#siteChecklistDialogContent');
+    return Boolean(elements.siteChecklistDialog && elements.siteChecklistDialogContent);
+  }
+
+  function openSiteChecklistDialog(permit, checklistKey) {
+    const checklist = getSiteValidationChecklists(permit).find((item) => item.key === checklistKey);
+    if (!checklist || !ensureSiteChecklistDialog()) {
+      showToast('Unable to open checklist popup. Refresh the page and try again.');
+      return;
+    }
+
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    const checklistState = getSiteChecklistState(permit.id, checklist.key);
+    elements.siteChecklistDialogContent.innerHTML = `
+      <div class="site-dialog-head">
+        <div>
+          <span class="permit-code">#${escapeHtml(displayPermitId(permit))}</span>
+          <h3>${escapeHtml(checklist.title)} Checklist</h3>
+          <p>${escapeHtml(checklist.summary)}</p>
+        </div>
+        <span class="risk-pill ${isSiteChecklistComplete(permit.id, checklist) ? 'low' : 'medium'}">
+          ${escapeHtml(`${getCheckedSiteChecklistCount(permit.id, checklist)}/${checklist.items.length}`)}
+        </span>
       </div>
-    `).join('');
+      <div class="site-dialog-list">
+        ${checklist.items.map((item) => {
+          const itemId = checklistItemId(item);
+          return `
+            <label>
+              <input type="checkbox" data-site-check-item="${escapeHtml(itemId)}" ${checklistState.checked?.[itemId] ? 'checked' : ''}>
+              <span>${escapeHtml(item)}</span>
+            </label>
+          `;
+        }).join('')}
+      </div>
+      <label class="site-dialog-notes">
+        <span>Site notes</span>
+        <textarea id="siteChecklistNotes" placeholder="Optional validation notes">${escapeHtml(checklistState.notes || '')}</textarea>
+      </label>
+      <div class="dialog-actions">
+        <button class="dialog-action secondary" type="button" data-site-checklist-close>Cancel</button>
+        <button class="dialog-action" type="button" data-site-checklist-save="${escapeHtml(checklist.key)}">Save Checklist</button>
+      </div>
+    `;
+
+    elements.siteChecklistDialogContent
+      .querySelector('[data-site-checklist-close]')
+      ?.addEventListener('click', closeSiteChecklistDialog);
+    elements.siteChecklistDialogContent
+      .querySelector('[data-site-checklist-save]')
+      ?.addEventListener('click', () => {
+        saveSiteChecklist(permit, checklist).catch((error) => {
+          showToast(error.error || error.message || 'Unable to save checklist notes.');
+        });
+      });
+
+    try {
+      if (typeof elements.siteChecklistDialog.showModal === 'function' && !elements.siteChecklistDialog.open) {
+        elements.siteChecklistDialog.showModal();
+      } else {
+        elements.siteChecklistDialog.setAttribute('open', '');
+      }
+    } catch {
+      elements.siteChecklistDialog.setAttribute('open', '');
+    }
+    requestAnimationFrame(() => window.scrollTo(scrollX, scrollY));
+  }
+
+  async function saveSiteChecklist(permit, checklist) {
+    const checked = {};
+    elements.siteChecklistDialogContent
+      .querySelectorAll('[data-site-check-item]')
+      .forEach((input) => {
+        checked[input.dataset.siteCheckItem] = input.checked;
+      });
+
+    const missing = checklist.items.filter((item) => !checked[checklistItemId(item)]);
+    if (missing.length) {
+      showToast(`Complete all ${checklist.title} checks before saving.`);
+      return;
+    }
+
+    state.siteValidationChecklists[permit.id] = {
+      ...(state.siteValidationChecklists[permit.id] || {}),
+      [checklist.key]: {
+        checked,
+        notes: elements.siteChecklistDialogContent.querySelector('#siteChecklistNotes')?.value.trim() || '',
+        updatedAt: new Date().toISOString(),
+      },
+    };
+    updatePermitSiteValidationState(permit.id, state.siteValidationChecklists[permit.id]);
+    persistStoredObject(SITE_VALIDATION_STORAGE_KEY, state.siteValidationChecklists);
+    await saveSiteValidationToServer(permit);
+    closeSiteChecklistDialog();
+    renderPermitReview();
+    showToast(`${checklist.title} checklist completed.`);
+  }
+
+  function closeSiteChecklistDialog() {
+    if (typeof elements.siteChecklistDialog?.close === 'function') {
+      elements.siteChecklistDialog.close();
+    } else {
+      elements.siteChecklistDialog?.removeAttribute('open');
+    }
+  }
+
+  function formatDateInput(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toISOString().slice(0, 10);
   }
 
   function renderTeamRows(permit) {
@@ -1282,11 +1846,20 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderPrerequisites(permit) {
-    const checks = [
-      ['Safety Officer Verification', 'Confirmed before supervisor release', 'Complete'],
-      ['Conflict Check', 'No overlapping active activities', 'No Conflicts'],
-      ['LOTO Verification', permit.controls.some((control) => /loto|isolation/i.test(control)) ? 'Isolation controls listed' : 'Not required for this scope', 'Verified'],
-    ];
+    const checks = permit.status === 'stage1_complete'
+      ? [
+          ['MOS Approval', 'Safety Officer completed MOS Approval', 'Complete'],
+          ['Permit Package', 'MOS/JSA digital evidence is available for review', 'Ready'],
+          ['Site Validation', 'Confirm site readiness before approving Permit Approval', 'Required'],
+        ]
+      : [
+          ['Permit Approval', 'Permit Approval completed before work release', 'Complete'],
+          isPermitExpired(permit)
+            ? ['Permit Window', 'Approved end time has passed. Reschedule or extend before release.', 'Expired']
+            : ['Permit Window', 'Approved work window is still valid', 'Valid'],
+          ['Conflict Check', 'No overlapping active activities', 'No Conflicts'],
+          ['LOTO Verification', permit.controls.some((control) => /loto|isolation/i.test(control)) ? 'Isolation controls listed' : 'Not required for this scope', 'Verified'],
+        ];
 
     return checks.map(([title, text, result]) => `
       <div class="prereq-item">
@@ -1300,14 +1873,27 @@ document.addEventListener('DOMContentLoaded', () => {
     `).join('');
   }
 
+  function siteValidationNoteSummary(permit) {
+    const record = state.siteValidationChecklists?.[permit.id] || permit.siteValidation || {};
+    const notes = getSiteValidationChecklists(permit)
+      .map((checklist) => {
+        const note = String(record?.[checklist.key]?.notes || '').trim();
+        return note ? `${checklist.title}: ${note}` : '';
+      })
+      .filter(Boolean);
+    return notes.length ? ` Site validation notes: ${notes.join(' | ')}.` : '';
+  }
+
   function renderReviewActions(permit) {
-    if (!['approved', 'active'].includes(permit.status)) {
+    if (!['stage1_complete', 'approved', 'active'].includes(permit.status)) {
       return '<button class="decision-button primary" type="button" data-decision="cancel">Back</button>';
     }
 
+    const approveLabel = permit.status === 'stage1_complete' ? 'Approve Permit Approval' : 'Release Work';
+    const releaseExpired = permit.status === 'approved' && isPermitExpired(permit);
     return `
       <button class="decision-button" type="button" data-decision="return">Return</button>
-      <button class="decision-button primary" type="button" data-decision="approve">Approve</button>
+      <button class="decision-button primary" type="button" data-decision="approve" ${permit.status === 'approved' ? 'data-live-release-button="true"' : ''} ${releaseExpired ? 'disabled title="Permit window expired. Return/reschedule or approve an extension before release."' : ''}>${releaseExpired ? 'Expired' : approveLabel}</button>
       <button class="decision-button danger" type="button" data-decision="reject">Reject</button>
     `;
   }
@@ -1331,8 +1917,10 @@ document.addEventListener('DOMContentLoaded', () => {
         outcome: 'rejected',
       },
       approve: {
-        status: 'active',
-        fallbackNote: 'Supervisor final approval granted. Permit released for active work.',
+        status: permit.status === 'stage1_complete' ? 'approved' : 'active',
+        fallbackNote: permit.status === 'stage1_complete'
+          ? `Supervisor approved Permit Approval.${siteValidationNoteSummary(permit)}`
+          : 'Supervisor final approval granted. Permit released for active work.',
         requiresNote: false,
       },
     };
@@ -1342,6 +1930,20 @@ document.addEventListener('DOMContentLoaded', () => {
     if (decision === 'approve' && permit.status === 'active') {
       showToast(`${displayPermitId(permit)} is already approved and active.`);
       return null;
+    }
+    if (decision === 'approve' && permit.status === 'approved' && isPermitExpired(permit)) {
+      showToast('Permit window expired. Return for reschedule or approve an extension before release.');
+      return null;
+    }
+    if (decision === 'approve' && permit.status === 'stage1_complete') {
+      const incompleteChecklist = getSiteValidationChecklists(permit).find(
+        (checklist) => !isSiteChecklistComplete(permit.id, checklist),
+      );
+      if (incompleteChecklist) {
+        showToast(`Complete ${incompleteChecklist.title} checklist before Permit Approval.`);
+        openSiteChecklistDialog(permit, incompleteChecklist.key);
+        return null;
+      }
     }
     if (reviewDecision.requiresNote && !notes) {
       showToast('Please add a reason before returning or rejecting the permit.');
@@ -1361,7 +1963,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const comments = {
-      approved: 'Supervisor review approved after Safety Officer routing.',
+      approved: 'Supervisor approved Permit Approval.',
       active: 'Supervisor final approval granted. Permit released for active work.',
       closed: 'Supervisor stopped or closed active work after monitoring verification.',
       rejected: 'Returned for correction by Supervisor.',
@@ -1423,6 +2025,46 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch {
       showToast('Unable to download this document.');
     }
+  }
+
+  async function downloadMosJsaExcel(permit) {
+    const documents = ['MOS', 'JSA']
+      .map((type) => getStructuredDocument(permit, type))
+      .filter(Boolean);
+
+    if (!documents.length) {
+      throw new Error('No MOS/JSA digital form data available for export.');
+    }
+
+    const response = await fetch(`${API_BASE}/api/permit-document-templates/mos-jsa/export`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${state.session.token}`,
+      },
+      body: JSON.stringify({ documents }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      let body = {};
+      try {
+        body = text ? JSON.parse(text) : {};
+      } catch {
+        body = { error: text };
+      }
+      throw body;
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${displayPermitId(permit)}-MOS-JSA.xlsx`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   }
 
   function setMetricPage(metric) {
@@ -1607,6 +2249,11 @@ document.addEventListener('DOMContentLoaded', () => {
       renderNotifications();
       setNotificationPanel(elements.notificationPanel?.hidden);
     });
+    elements.reviewNotificationButton?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      renderNotifications();
+      setNotificationPanel(elements.notificationPanel?.hidden);
+    });
     elements.notificationCloseButton?.addEventListener('click', () => setNotificationPanel(false));
     elements.notificationList?.addEventListener('click', (event) => {
       const persistentButton = event.target.closest('[data-notification-id]');
@@ -1636,6 +2283,7 @@ document.addEventListener('DOMContentLoaded', () => {
       setNotificationPanel(false);
     });
     elements.profileButton.addEventListener('click', () => window.location.assign('/account'));
+    elements.reviewProfileAvatar?.addEventListener('click', () => window.location.assign('/account'));
     elements.logoutButton?.addEventListener('click', () => {
       clearSession();
       window.location.assign('/login');
@@ -1648,6 +2296,8 @@ document.addEventListener('DOMContentLoaded', () => {
     wireEvents();
     await refreshData();
     setView('dashboard');
+    updateLiveTimers();
+    setInterval(updateLiveTimers, 1000);
   }
 
   init().catch((error) => {

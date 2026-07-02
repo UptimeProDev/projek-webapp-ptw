@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PTW SafetyGuard</title>
-  <link rel="stylesheet" href="/style.css?v=3" />
+  <title>PTW SafetyGuard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css?v=6" />
 </head>
 <body>
     <main class="auth-shell" data-mode="signup">
@@ -178,6 +179,10 @@
           </form>
 
           <form class="auth-form is-hidden" id="loginForm" autocomplete="on">
+            <div class="login-brand">
+              <img src="/assets/ptw-guardian-login-v2.png" alt="PTW Guardian" />
+              <p>Permit To Work Safety Access</p>
+            </div>
             <div class="form-heading">
               <h2>Sign In</h2>
               <p>Access the safety management dashboard.</p>
@@ -280,6 +285,7 @@
             <h2>Access Granted</h2>
             <p id="sessionSummary"></p>
             <dl class="session-details" id="sessionDetails"></dl>
+            <div class="role-selection" id="roleSelection"></div>
             <button class="primary-button" type="button" id="logoutButton">
               <span>Sign Out</span>
             </button>
@@ -303,6 +309,6 @@
         </footer>
       </section>
   </main>
-  <script src="/app.js?v=3"></script>
+  <script src="/app.js?v=8"></script>
 </body>
 </html>

@@ -4,23 +4,20 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Admin Lane 2 | PTW Guardian</title>
-  <link rel="stylesheet" href="/admin.css?v=lane2-3" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700;900&display=swap" rel="stylesheet">
-</head>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/admin.css?v=lane2-11" />
+  </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">PTW</div>
-        <div class="brand-text">
-          <h1>PTW Guardian</h1>
-          <p>Lane 2 Administration</p>
-        </div>
+        <img class="brand-logo" src="/assets/ptw-guardian-login-v2.png" alt="PTW Guardian" />
       </div>
 
       <nav class="nav">
         <button class="nav-item active" type="button">Worker Review</button>
         <button class="nav-item" type="button">Draft Review</button>
+        <button class="nav-item" type="button">User Roles</button>
         <button class="nav-item" type="button">Audit Trails</button>
       </nav>
 
@@ -89,7 +86,7 @@
                 <option value="">All statuses</option>
                 <option value="Submitted">Submitted</option>
                 <option value="Valid">Valid</option>
-                <option value="Returned">Returned</option>
+                <option value="Inactive">Inactive</option>
               </select>
             </span>
           </label>
@@ -103,7 +100,7 @@
                 <option value="Electrical Isolation">Electrical Isolation</option>
                 <option value="Work at Height">Work at Height</option>
                 <option value="Line Breaking">Line Breaking</option>
-                <option value="General Maintenance">General Maintenance</option>
+                <option value="Chemical Handling">Chemical Handling</option>
               </select>
             </span>
           </label>
@@ -139,6 +136,16 @@
 
           <div class="section-panels">
             <section id="manageCompetencySection" class="section-panel active">
+              <div class="add-worker">
+                <div class="add-worker-head">
+                  <div>
+                    <h3>Worker Records</h3>
+                    <p class="muted">Create and maintain worker competency records for permit assignment.</p>
+                  </div>
+                  <button class="btn small" id="addWorkerButton" type="button">Add Worker</button>
+                </div>
+              </div>
+
               <table class="competency-table" aria-describedby="competencyEmpty">
                 <thead>
                   <tr>
@@ -201,6 +208,19 @@
               </div>
             </section>
 
+            <section id="userRolesSection" class="section-panel hidden">
+              <div class="detail-card">
+                <div class="list-head">
+                  <div>
+                    <h3>User Role Management</h3>
+                    <p class="muted">Assign one or more application access roles to each non-worker account.</p>
+                  </div>
+                  <span class="badge pending" id="userRoleCount">0 users</span>
+                </div>
+                <div class="user-role-list" id="userRoleList"></div>
+              </div>
+            </section>
+
             <section id="auditTrailsSection" class="section-panel hidden">
               <div class="detail-card">
                 <div class="list-head">
@@ -243,19 +263,93 @@
       <div class="review-body" id="workerReviewBody"></div>
 
       <div class="review-decision">
-        <label class="review-return-field">
-          <span>Return reason</span>
-          <textarea id="workerReturnReason" placeholder="Required only when returning for correction"></textarea>
-        </label>
         <div class="button-row">
           <button class="btn small secondary" type="button" data-close-worker-review>Cancel</button>
-          <button class="btn small danger" type="button" id="returnWorkerButton">Return for Correction</button>
           <button class="btn small" type="button" id="approveWorkerButton">Mark Valid</button>
         </div>
       </div>
     </div>
   </dialog>
 
-  <script src="/admin.js?v=lane2-7"></script>
+  <dialog class="review-dialog worker-form-dialog" id="addWorkerDialog">
+    <form class="add-worker-form worker-modal-shell" id="addWorkerForm">
+      <div class="review-head worker-modal-head">
+        <div>
+          <p class="review-kicker" id="addWorkerKicker">Worker Record</p>
+          <h3 id="addWorkerDialogTitle">Add Worker</h3>
+          <p class="muted" id="addWorkerDialogSubtitle">Enter the worker details, permit authorizations, and competency certificates.</p>
+        </div>
+        <button class="btn small secondary" type="button" data-close-add-worker>Close</button>
+      </div>
+
+      <div class="worker-modal-body">
+        <section class="worker-form-section">
+          <div class="worker-form-section-head">
+            <h4>Basic Details</h4>
+            <p class="muted">Use the same identity details as the worker account.</p>
+          </div>
+          <div class="worker-form-grid compact">
+            <label class="worker-field span-4">
+              <span>Full Name</span>
+              <input id="newWorkerName" name="name" type="text" autocomplete="name" required>
+            </label>
+            <label class="worker-field span-4">
+              <span>IC / Passport</span>
+              <input id="newWorkerIcPassport" name="icPassport" type="text" required>
+            </label>
+            <label class="worker-field span-4">
+              <span>Worker ID</span>
+              <input id="newWorkerId" name="employeeId" type="text" placeholder="Auto from account">
+            </label>
+            <label class="worker-field span-4">
+              <span>Company</span>
+              <input id="newWorkerCompany" name="company" type="text" autocomplete="organization">
+            </label>
+            <label class="worker-field span-4">
+              <span>Role / Trade</span>
+              <select id="newWorkerRole" name="role"></select>
+            </label>
+            <label class="worker-field span-2">
+              <span>Phone</span>
+              <input id="newWorkerPhone" name="phone" type="tel" autocomplete="tel">
+            </label>
+            <label class="worker-field span-2">
+              <span>Email</span>
+              <input id="newWorkerEmail" name="email" type="email" autocomplete="email">
+            </label>
+          </div>
+        </section>
+
+        <section class="worker-form-section">
+          <div class="worker-form-section-head">
+            <h4>Permit Types</h4>
+            <p class="muted">Select the work types this worker is allowed to be assigned to.</p>
+          </div>
+          <div class="permit-type-grid" id="newWorkerPermits"></div>
+        </section>
+
+        <section class="worker-form-section">
+          <div class="worker-form-section-head">
+            <div>
+              <h4>Certifications</h4>
+              <p class="muted">Add certificate numbers, validity dates, and optional files.</p>
+            </div>
+            <button class="btn small secondary" id="addCertificationButton" type="button">Add Certification</button>
+          </div>
+          <div class="certification-list" id="newWorkerCertifications"></div>
+        </section>
+      </div>
+
+      <div class="add-worker-actions worker-modal-actions">
+        <p class="worker-form-message" id="addWorkerMessage" role="status" aria-live="polite"></p>
+        <button class="btn small secondary" id="cancelAddWorkerButton" type="button">Cancel</button>
+        <button class="btn small secondary" type="reset">Clear</button>
+        <button class="btn small" id="addWorkerSubmit" type="submit">Add Worker</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/role-switcher.js?v=3"></script>
+  <script src="/admin.js?v=lane2-25"></script>
 </body>
 </html>

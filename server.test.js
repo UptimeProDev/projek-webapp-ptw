@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const ExcelJS = require("exceljs");
 
 process.env.NODE_ENV = "test";
 process.env.DB_NAME = process.env.DB_NAME || "ptw_test";
@@ -147,6 +148,47 @@ test("login route serves the auth page", async (t) => {
   assert.match(body, /id="loginForm"/);
 });
 
+test("admin can assign multiple application roles to one user", async (t) => {
+  requireDb(t);
+  const server = await startTestServer();
+  t.after(() => server.close());
+
+  const user = await createSignedInUser(server);
+  const admin = await loginDemoUser(server, "admin@example.com", "admin12345");
+
+  const safetySupervisor = await requestJson(server, `/api/users/${user.user.id}/roles`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${admin.token}` },
+    body: JSON.stringify({ roles: ["safety_officer", "supervisor"] }),
+  });
+
+  assert.equal(safetySupervisor.response.status, 200);
+  assert.deepEqual(safetySupervisor.body.user.roles, ["safety_officer", "supervisor"]);
+  assert.equal(safetySupervisor.body.user.role, "safety_officer");
+
+  const supervisorDashboard = await requestJson(server, "/api/approver/dashboard", {
+    headers: { Authorization: `Bearer ${user.token}` },
+  });
+
+  assert.equal(supervisorDashboard.response.status, 200);
+
+  const adminSafety = await requestJson(server, `/api/users/${user.user.id}/roles`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${admin.token}` },
+    body: JSON.stringify({ roles: ["admin", "safety_officer"] }),
+  });
+
+  assert.equal(adminSafety.response.status, 200);
+  assert.deepEqual(adminSafety.body.user.roles, ["admin", "safety_officer"]);
+
+  const userList = await requestJson(server, "/api/users", {
+    headers: { Authorization: `Bearer ${user.token}` },
+  });
+
+  assert.equal(userList.response.status, 200);
+  assert.ok(Array.isArray(userList.body.users));
+});
+
 test("dashboard route serves the requester dashboard page", async (t) => {
   requireDb(t);
   const server = await startTestServer();
@@ -192,7 +234,8 @@ test("safety route serves the safety officer lane page", async (t) => {
   const body = await response.text();
 
   assert.equal(response.status, 200);
-  assert.match(body, /Lane 3 Technical Risk/);
+  assert.match(body, /ptw-guardian-login-v2\.png/);
+  assert.match(body, /Safety Officer Dashboard/);
 });
 
 test("review route serves the supervisor review page", async (t) => {
@@ -255,13 +298,9 @@ test("worker profiles must link to an existing registered worker account", async
   const server = await startTestServer();
   t.after(() => server.close());
 
-  const requester = await loginDemoUser(
-    server,
-    "requester@example.com",
-    "requester12345",
-  );
-  const requesterHeaders = {
-    authorization: `Bearer ${requester.token}`,
+  const admin = await loginDemoUser(server, "admin@example.com", "admin12345");
+  const adminHeaders = {
+    authorization: `Bearer ${admin.token}`,
   };
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const existingUserEmail = `linked-existing-${suffix}@example.com`;
@@ -280,18 +319,19 @@ test("worker profiles must link to an existing registered worker account", async
   });
 
   assert.equal(workerSignup.response.status, 201);
+  assert.match(workerSignup.body.user.employeeId, /^W/);
   assert.notEqual(workerSignup.body.user.employeeId, existingProfileEmployeeId);
 
   const createExistingProfile = await requestJson(server, "/api/workers", {
     method: "POST",
-    headers: requesterHeaders,
+    headers: adminHeaders,
     body: JSON.stringify({
       name: "Linked Existing Worker",
       icPassport: `IC-${suffix}`,
       employeeId: existingProfileEmployeeId,
       role: "General Worker",
       email: existingUserEmail,
-      permits: ["General Maintenance"],
+      permits: ["Chemical Handling"],
     }),
   });
 
@@ -313,14 +353,14 @@ test("worker profiles must link to an existing registered worker account", async
   const profileFirstEmployeeId = `WP-${suffix.slice(-6)}`.toUpperCase();
   const createProfileFirst = await requestJson(server, "/api/workers", {
     method: "POST",
-    headers: requesterHeaders,
+    headers: adminHeaders,
     body: JSON.stringify({
       name: "Linked Profile First Worker",
       icPassport: `ICP-${suffix}`,
       employeeId: profileFirstEmployeeId,
       role: "General Worker",
       email: profileFirstEmail,
-      permits: ["General Maintenance"],
+      permits: ["Chemical Handling"],
     }),
   });
 
@@ -340,6 +380,7 @@ test("worker profiles must link to an existing registered worker account", async
   });
 
   assert.equal(profileFirstSignup.response.status, 201);
+  assert.match(profileFirstSignup.body.user.employeeId, /^W/);
   assert.notEqual(profileFirstSignup.body.user.employeeId, profileFirstEmployeeId);
 });
 
@@ -444,7 +485,8 @@ test("supervisor command dashboard summarizes real routed permits", async (t) =>
     headers: supervisorHeaders,
   });
 
-  assert.equal(supervisorAttempt.response.status, 403);
+  assert.equal(supervisorAttempt.response.status, 200);
+  assert.equal(supervisorAttempt.body.user.role, "supervisor");
 });
 
 test("demo admin account can log in", async (t) => {
@@ -520,7 +562,7 @@ test("workflow notifications are stored and can be marked read", async (t) => {
   assert.ok(readResult.body.readAt);
 });
 
-test("requester can submit worker profiles for admin review", async (t) => {
+test("admin can add and manage worker profiles", async (t) => {
   requireDb(t);
   const server = await startTestServer();
   t.after(() => server.close());
@@ -550,6 +592,19 @@ test("requester can submit worker profiles for admin review", async (t) => {
   const createCertData = Buffer.from("%PDF-1.4 hot work certificate").toString("base64");
   const updateCertData = Buffer.from("%PDF-1.4 fire watch certificate").toString("base64");
 
+  const blockedRequesterCreate = await requestJson(server, "/api/workers", {
+    method: "POST",
+    headers: requesterHeaders,
+    body: JSON.stringify({
+      name: "Requester Worker",
+      icPassport: `${icPassport}-R`,
+      employeeId: `${employeeId}-Q`,
+    }),
+  });
+
+  assert.equal(blockedRequesterCreate.response.status, 403);
+  assert.match(blockedRequesterCreate.body.error, /Only admin/);
+
   const blockedCreate = await requestJson(server, "/api/workers", {
     method: "POST",
     headers: supervisorHeaders,
@@ -577,7 +632,7 @@ test("requester can submit worker profiles for admin review", async (t) => {
 
   const mismatchedWorkerAccount = await requestJson(server, "/api/workers", {
     method: "POST",
-    headers: requesterHeaders,
+    headers: adminHeaders,
     body: JSON.stringify({
       name: "Ali Wrong Name",
       icPassport: `${icPassport}-M`,
@@ -592,7 +647,7 @@ test("requester can submit worker profiles for admin review", async (t) => {
 
   const createResult = await requestJson(server, "/api/workers", {
     method: "POST",
-    headers: requesterHeaders,
+    headers: adminHeaders,
     body: JSON.stringify({
       name: "Ali Hassan",
       icPassport,
@@ -620,9 +675,9 @@ test("requester can submit worker profiles for admin review", async (t) => {
 
   assert.equal(createResult.response.status, 201);
   assert.ok(createResult.body.id);
-  assert.equal(createResult.body.status, "submitted");
-  assert.equal(createResult.body.createdBy, requester.user.id);
-  assert.equal(createResult.body.createdByName, "Rina Requester");
+  assert.equal(createResult.body.status, "valid");
+  assert.equal(createResult.body.createdBy, admin.user.id);
+  assert.equal(createResult.body.createdByName, "PTW Admin");
   assert.equal(createResult.body.employeeId, aliAccount.body.user.employeeId);
   assert.equal(createResult.body.icPassport, icPassport);
   assert.equal(createResult.body.position, "Welder");
@@ -662,8 +717,8 @@ test("requester can submit worker profiles for admin review", async (t) => {
   assert.equal(listResult.response.status, 200);
   const listedWorker = listResult.body.workers.find((worker) => worker.id === createResult.body.id);
   assert.ok(listedWorker);
-  assert.equal(listedWorker.createdByName, "Rina Requester");
-  assert.equal(listedWorker.createdByEmail, "requester@example.com");
+  assert.equal(listedWorker.createdByName, "PTW Admin");
+  assert.equal(listedWorker.createdByEmail, "admin@example.com");
 
   const deleteCandidateAccount = await requestJson(server, "/api/auth/signup", {
     method: "POST",
@@ -680,7 +735,7 @@ test("requester can submit worker profiles for admin review", async (t) => {
 
   const deleteCandidateResult = await requestJson(server, "/api/workers", {
     method: "POST",
-    headers: requesterHeaders,
+    headers: adminHeaders,
     body: JSON.stringify({
       name: "Delete Candidate",
       icPassport: `${icPassport}-D`,
@@ -692,41 +747,28 @@ test("requester can submit worker profiles for admin review", async (t) => {
   });
   assert.equal(deleteCandidateResult.response.status, 201);
 
-  const requesterDeleteResult = await requestJson(
+  const adminDeleteCandidateResult = await requestJson(
     server,
     `/api/workers/${deleteCandidateResult.body.id}`,
     {
       method: "DELETE",
-      headers: requesterHeaders,
+      headers: adminHeaders,
     },
   );
-  assert.equal(requesterDeleteResult.response.status, 200);
-  assert.equal(requesterDeleteResult.body.status, "deleted");
+  assert.equal(adminDeleteCandidateResult.response.status, 200);
+  assert.equal(adminDeleteCandidateResult.body.status, "deleted");
 
-  const afterRequesterDelete = await requestJson(server, "/api/workers", {
+  const afterAdminDelete = await requestJson(server, "/api/workers", {
     headers: adminHeaders,
   });
   assert.equal(
-    afterRequesterDelete.body.workers.some((worker) => worker.id === deleteCandidateResult.body.id),
+    afterAdminDelete.body.workers.some((worker) => worker.id === deleteCandidateResult.body.id),
     false,
   );
 
-  const returnResult = await requestJson(server, `/api/workers/${createResult.body.id}/status`, {
-    method: "PATCH",
-    headers: adminHeaders,
-    body: JSON.stringify({
-      status: "rejected",
-      reviewComment: "Certificate number needs correction",
-    }),
-  });
-
-  assert.equal(returnResult.response.status, 200);
-  assert.equal(returnResult.body.status, "rejected");
-  assert.equal(returnResult.body.reviewComment, "Certificate number needs correction");
-
   const invalidUpdateResult = await requestJson(server, `/api/workers/${createResult.body.id}`, {
     method: "PATCH",
-    headers: requesterHeaders,
+    headers: adminHeaders,
     body: JSON.stringify({
       name: "Ali Hassan",
       icPassport,
@@ -756,7 +798,7 @@ test("requester can submit worker profiles for admin review", async (t) => {
 
   const updateResult = await requestJson(server, `/api/workers/${createResult.body.id}`, {
     method: "PATCH",
-    headers: requesterHeaders,
+    headers: adminHeaders,
     body: JSON.stringify({
       name: "Ali Hassan Updated",
       icPassport,
@@ -766,6 +808,7 @@ test("requester can submit worker profiles for admin review", async (t) => {
       email: "ali.updated@example.com",
       company: "XYZ Contractor",
       permits: ["Hot Work"],
+      reviewComment: "Updated by Admin",
       certifications: [
         {
           type: "Fire Watch",
@@ -785,8 +828,8 @@ test("requester can submit worker profiles for admin review", async (t) => {
   assert.equal(updateResult.response.status, 200);
   assert.equal(updateResult.body.name, "Ali Hassan Updated");
   assert.equal(updateResult.body.employeeId, aliUpdatedAccount.body.user.employeeId);
-  assert.equal(updateResult.body.status, "submitted");
-  assert.equal(updateResult.body.reviewComment, "");
+  assert.equal(updateResult.body.status, "valid");
+  assert.equal(updateResult.body.reviewComment, "Updated by Admin");
   assert.equal(updateResult.body.phone, "+60 19-222 3333");
   assert.equal(updateResult.body.email, "ali.updated@example.com");
   assert.equal(updateResult.body.company, "XYZ Contractor");
@@ -849,59 +892,132 @@ test("requester can submit worker profiles for admin review", async (t) => {
   assert.equal(workerLogin.response.status, 200);
   assert.equal(workerLogin.body.user.role, "worker");
 
-  const resendActivationResult = await requestJson(
-    server,
-    `/api/workers/${createResult.body.id}/activation-link`,
-    {
-      method: "POST",
-      headers: adminHeaders,
-    },
-  );
-
-  assert.equal(resendActivationResult.response.status, 200);
-  assert.equal(resendActivationResult.body.user.email, "ali.updated@example.com");
-  assert.equal(resendActivationResult.body.user.accountStatus, "pending_activation");
-  assert.ok(resendActivationResult.body.activationLink);
-  assert.equal(resendActivationResult.body.delivery.sent, false);
-  assert.notEqual(resendActivationResult.body.activationLink, approveResult.body.workerAccount.activationLink);
-
-  const oldPasswordLogin = await requestJson(server, "/api/auth/login", {
+  const linkedPermitResult = await requestJson(server, "/api/permits", {
     method: "POST",
+    headers: requesterHeaders,
     body: JSON.stringify({
-      login: "ali.updated@example.com",
-      password: "WorkerStrong123!",
+      title: "Worker history retention permit",
+      workType: "Hot Work",
+      location: "Plant 7",
+      description: "Permit Type: Hot Work\nWorker deletion retention check.",
+      startDateTime: "2026-06-26T08:00:00+08:00",
+      endDateTime: "2026-06-26T12:00:00+08:00",
+      hazards: ["Hot Work"],
+      controls: ["Fire watch"],
+      ppe: ["Gloves"],
+      approvers: ["Sam Supervisor"],
+      assignedWorkers: [createResult.body.id],
     }),
   });
-  assert.equal(oldPasswordLogin.response.status, 403);
-  assert.equal(oldPasswordLogin.body.activationRequired, true);
-
-  const resendToken = new URL(resendActivationResult.body.activationLink).searchParams.get("token");
-  const reactivationResult = await requestJson(server, "/api/auth/activate", {
-    method: "POST",
-    body: JSON.stringify({
-      token: resendToken,
-      password: "WorkerStrong456!",
-    }),
-  });
-  assert.equal(reactivationResult.response.status, 200);
-  assert.equal(reactivationResult.body.user.role, "worker");
+  assert.equal(linkedPermitResult.response.status, 201);
 
   const deleteResult = await requestJson(server, `/api/workers/${createResult.body.id}`, {
     method: "DELETE",
     headers: adminHeaders,
   });
 
-  assert.equal(deleteResult.response.status, 200);
-  assert.equal(deleteResult.body.status, "deleted");
+  assert.equal(deleteResult.response.status, 409);
+  assert.match(deleteResult.body.error, /permit history/i);
+
+  const deactivateResult = await requestJson(server, `/api/workers/${createResult.body.id}/status`, {
+    method: "PATCH",
+    headers: adminHeaders,
+    body: JSON.stringify({ status: "inactive" }),
+  });
+
+  assert.equal(deactivateResult.response.status, 200);
+  assert.equal(deactivateResult.body.status, "inactive");
+  assert.equal(deactivateResult.body.reviewComment, "Deactivated by Admin");
+  assert.equal(deactivateResult.body.workerAccount.user.accountStatus, "inactive");
+
+  const inactiveSessionResult = await requestJson(server, "/api/auth/me", {
+    headers: {
+      authorization: `Bearer ${workerLogin.body.token}`,
+    },
+  });
+  assert.equal(inactiveSessionResult.response.status, 401);
+
+  const inactiveLogin = await requestJson(server, "/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({
+      login: "ali.updated@example.com",
+      password: "WorkerStrong123!",
+    }),
+  });
+  assert.equal(inactiveLogin.response.status, 403);
+  assert.equal(inactiveLogin.body.error, "Account deactivated, please contact the admin.");
+
+  const reactivateProfileResult = await requestJson(server, `/api/workers/${createResult.body.id}/status`, {
+    method: "PATCH",
+    headers: adminHeaders,
+    body: JSON.stringify({ status: "valid" }),
+  });
+  assert.equal(reactivateProfileResult.response.status, 200);
+  assert.equal(reactivateProfileResult.body.status, "valid");
+  assert.equal(reactivateProfileResult.body.workerAccount.user.accountStatus, "active");
+
+  const reactivatedLogin = await requestJson(server, "/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({
+      login: "ali.updated@example.com",
+      password: "WorkerStrong123!",
+    }),
+  });
+  assert.equal(reactivatedLogin.response.status, 200);
+  assert.equal(reactivatedLogin.body.user.role, "worker");
+
+  await requestJson(server, `/api/workers/${createResult.body.id}/status`, {
+    method: "PATCH",
+    headers: adminHeaders,
+    body: JSON.stringify({ status: "inactive" }),
+  });
 
   const finalList = await requestJson(server, "/api/workers", {
     headers: adminHeaders,
   });
 
-  assert.equal(
-    finalList.body.workers.some((worker) => worker.id === createResult.body.id),
-    false,
-  );
+  const inactiveWorker = finalList.body.workers.find((worker) => worker.id === createResult.body.id);
+  assert.ok(inactiveWorker);
+  assert.equal(inactiveWorker.status, "inactive");
+
+  const requesterWorkerList = await requestJson(server, "/api/workers", {
+    headers: requesterHeaders,
+  });
+  const inactiveRequesterWorker = requesterWorkerList.body.workers.find((worker) => worker.id === createResult.body.id);
+  assert.ok(inactiveRequesterWorker);
+  assert.equal(inactiveRequesterWorker.status, "inactive");
+
+  const inactiveAssignmentResult = await requestJson(server, "/api/permits", {
+    method: "POST",
+    headers: requesterHeaders,
+    body: JSON.stringify({
+      title: "Inactive worker assignment",
+      workType: "Preventive Maintenance",
+      location: "Plant 7",
+      description: "Attempt to assign inactive worker.",
+      startDateTime: "2026-06-26T13:00:00+08:00",
+      endDateTime: "2026-06-26T15:00:00+08:00",
+      hazards: ["Hot Work"],
+      controls: ["Permit controls"],
+      ppe: ["Hard hat"],
+      approvers: ["PTW Admin"],
+      documents: [
+        {
+          type: "MOS",
+          name: "MOS digital form",
+          structuredData: { workTitle: "Inactive worker assignment" },
+        },
+        {
+          type: "JSA",
+          name: "JSA digital form",
+          structuredData: { taskStep: "Inactive worker assignment" },
+        },
+      ],
+      assignedWorkers: [createResult.body.id],
+    }),
+  });
+  assert.equal(inactiveAssignmentResult.response.status, 400);
+  assert.match(inactiveAssignmentResult.body.error, /Inactive worker cannot be assigned/i);
 });
 
 test("permit can be created, admin-submitted, and audited", async (t) => {
@@ -1013,6 +1129,88 @@ test("permit can be created, admin-submitted, and audited", async (t) => {
 
   assert.equal(auditResult.response.status, 200);
   assert.equal(auditResult.body.count, 2);
+});
+
+test("MOS and JSA Excel template can be imported and saved as digital permit documents", async (t) => {
+  requireDb(t);
+  const server = await startTestServer();
+  t.after(() => server.close());
+
+  const signup = await createSignedInUser(server);
+  const authHeaders = {
+    authorization: `Bearer ${signup.token}`,
+  };
+
+  const templateResponse = await fetch(serverUrl(server, "/api/permit-document-templates/mos-jsa.xlsx"), {
+    headers: authHeaders,
+  });
+  assert.equal(templateResponse.status, 200);
+  assert.match(
+    templateResponse.headers.get("content-type") || "",
+    /application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet/,
+  );
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(Buffer.from(await templateResponse.arrayBuffer()));
+  workbook.getWorksheet("MOS").getCell("C2").value = "Pump skid preventive maintenance";
+  workbook.getWorksheet("MOS").getCell("C4").value = "Inspect pump\nReplace worn seal\nTest run";
+  workbook.getWorksheet("JSA").getCell("C2").value = "Mechanical maintenance";
+  workbook.getWorksheet("JSA").getCell("C5").value = "Barricade area\nVerify isolation";
+
+  const completedTemplate = Buffer.from(await workbook.xlsx.writeBuffer()).toString("base64");
+  const importResult = await requestJson(server, "/api/permit-document-templates/mos-jsa/import", {
+    method: "POST",
+    headers: authHeaders,
+    body: JSON.stringify({
+      fileName: "completed-mos-jsa.xlsx",
+      attachmentData: completedTemplate,
+    }),
+  });
+
+  assert.equal(importResult.response.status, 200);
+  assert.equal(importResult.body.documents.length, 2);
+  assert.equal(importResult.body.documents[0].type, "MOS");
+  assert.equal(importResult.body.documents[0].structuredData.workTitle, "Pump skid preventive maintenance");
+  assert.equal(importResult.body.documents[1].type, "JSA");
+  assert.equal(importResult.body.documents[1].structuredData.taskStep, "Mechanical maintenance");
+
+  const exportResponse = await fetch(serverUrl(server, "/api/permit-document-templates/mos-jsa/export"), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...authHeaders,
+    },
+    body: JSON.stringify({ documents: importResult.body.documents }),
+  });
+  assert.equal(exportResponse.status, 200);
+  const exportedWorkbook = new ExcelJS.Workbook();
+  await exportedWorkbook.xlsx.load(Buffer.from(await exportResponse.arrayBuffer()));
+  assert.equal(exportedWorkbook.getWorksheet("MOS").getCell("C2").value, "Pump skid preventive maintenance");
+  assert.equal(exportedWorkbook.getWorksheet("JSA").getCell("C5").value, "Barricade area\nVerify isolation");
+
+  const createResult = await requestJson(server, "/api/permits", {
+    method: "POST",
+    headers: authHeaders,
+    body: JSON.stringify({
+      title: "Pump skid preventive maintenance",
+      workType: "Preventive Maintenance",
+      location: "Plant 1 - Area B",
+      description: "Preventive maintenance for pump skid.",
+      startDateTime: "2026-06-01T08:00:00+08:00",
+      endDateTime: "2026-06-01T12:00:00+08:00",
+      hazards: ["Preventive Maintenance"],
+      controls: ["barricade"],
+      ppe: ["Hard hat", "Safety boots"],
+      approvers: ["PTW Admin"],
+      documents: importResult.body.documents,
+    }),
+  });
+
+  assert.equal(createResult.response.status, 201);
+  assert.equal(createResult.body.documents.length, 2);
+  assert.equal(createResult.body.documents[0].source, "mos-jsa-digital-form");
+  assert.equal(createResult.body.documents[0].structuredData.workTitle, "Pump skid preventive maintenance");
+  assert.equal(createResult.body.documents[1].structuredData.controlMeasures, "Barricade area\nVerify isolation");
 });
 
 test("requester can edit drafts while Admin Lane 2 submits normal permits", async (t) => {
@@ -1127,6 +1325,64 @@ test("requester can edit drafts while Admin Lane 2 submits normal permits", asyn
   assert.equal(rejectResult.response.status, 200);
   assert.equal(rejectResult.body.status, "rejected");
 
+  const unchangedRevisionAttempt = await requestJson(server, `/api/permits/${createResult.body.id}`, {
+    method: "PATCH",
+    headers: requesterHeaders,
+    body: JSON.stringify({
+      title: "Updated draft scope",
+      location: "Plant 2 - Area C",
+      description: "Permit Type: Hot Work\n\nUpdated requester scope.",
+      startDateTime: "2026-06-03T09:00:00+08:00",
+      endDateTime: "2026-06-03T13:00:00+08:00",
+      hazards: ["hot work"],
+      controls: ["fire watch", "gas test"],
+      ppe: ["gloves", "face shield"],
+      approvers: ["supervisor@example.com"],
+    }),
+  });
+
+  assert.equal(unchangedRevisionAttempt.response.status, 409);
+  assert.match(unchangedRevisionAttempt.body.error, /Change at least one/);
+
+  const metadataOnlyRevisionAttempt = await requestJson(server, `/api/permits/${createResult.body.id}`, {
+    method: "PATCH",
+    headers: requesterHeaders,
+    body: JSON.stringify({
+      title: "Updated draft scope",
+      workType: "Hot Work",
+      location: "Plant 2 - Area C",
+      description:
+        "Permit Class: Normal\nReview Route: Admin Lane 2 -> Safety Officer\nPermit Type: Hot Work\nAssigned Workers: -\nAssigned Worker IDs: -\n\nUpdated requester scope.",
+      startDateTime: "2026-06-03T09:00:00+08:00",
+      endDateTime: "2026-06-03T13:00:00+08:00",
+      hazards: ["hot work"],
+      controls: ["fire watch", "gas test"],
+      ppe: ["gloves", "face shield"],
+      approvers: ["supervisor@example.com"],
+      assignedWorkers: [],
+      isEmergency: false,
+    }),
+  });
+
+  assert.equal(metadataOnlyRevisionAttempt.response.status, 409);
+  assert.match(metadataOnlyRevisionAttempt.body.error, /Change at least one/);
+
+  const earlyAdminResubmitAttempt = await requestJson(
+    server,
+    `/api/permits/${createResult.body.id}/status`,
+    {
+      method: "PATCH",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        status: "submitted",
+        comment: "Admin resubmitted before requester correction",
+      }),
+    },
+  );
+
+  assert.equal(earlyAdminResubmitAttempt.response.status, 409);
+  assert.match(earlyAdminResubmitAttempt.body.error, /Requester must revise/);
+
   const reviseResult = await requestJson(server, `/api/permits/${createResult.body.id}`, {
     method: "PATCH",
     headers: requesterHeaders,
@@ -1145,6 +1401,7 @@ test("requester can edit drafts while Admin Lane 2 submits normal permits", asyn
 
   assert.equal(reviseResult.response.status, 200);
   assert.equal(reviseResult.body.title, "Revised controls attached");
+  assert.equal(reviseResult.body.status, "resubmitted");
 
   const requesterResubmitAttempt = await requestJson(
     server,
@@ -1271,6 +1528,7 @@ test("permit status changes are restricted by role", async (t) => {
     "supervisor@example.com",
     "supervisor12345",
   );
+  const worker = await loginDemoUser(server, "worker@example.com", "worker12345");
   const admin = await loginDemoUser(server, "admin@example.com", "admin12345");
 
   const requesterHeaders = {
@@ -1278,6 +1536,9 @@ test("permit status changes are restricted by role", async (t) => {
   };
   const supervisorHeaders = {
     authorization: `Bearer ${supervisor.token}`,
+  };
+  const workerHeaders = {
+    authorization: `Bearer ${worker.token}`,
   };
   const adminHeaders = {
     authorization: `Bearer ${admin.token}`,
@@ -1296,6 +1557,21 @@ test("permit status changes are restricted by role", async (t) => {
   });
 
   assert.equal(supervisorCreateAttempt.response.status, 403);
+
+  const workerCreateAttempt = await requestJson(server, "/api/permits", {
+    method: "POST",
+    headers: workerHeaders,
+    body: JSON.stringify({
+      title: "Worker should not create",
+      location: "Plant 1",
+      description: "Workers can only act on assigned permits.",
+      startDateTime: "2026-06-01T08:00:00+08:00",
+      endDateTime: "2026-06-01T12:00:00+08:00",
+    }),
+  });
+
+  assert.equal(workerCreateAttempt.response.status, 403);
+  assert.match(worker.user.employeeId, /^W/);
 
   const createResult = await requestJson(server, "/api/permits", {
     method: "POST",
@@ -1379,6 +1655,188 @@ test("permit status changes are restricted by role", async (t) => {
   assert.equal(supervisorApproveResult.body.status, "approved");
 });
 
+test("Permit Approval can be completed by supervisor or safety officer", async (t) => {
+  requireDb(t);
+  const server = await startTestServer();
+  t.after(() => server.close());
+
+  const requester = await loginDemoUser(server, "requester@example.com", "requester12345");
+  const admin = await loginDemoUser(server, "admin@example.com", "admin12345");
+  const supervisor = await loginDemoUser(server, "supervisor@example.com", "supervisor12345");
+  const safety = await loginDemoUser(server, "safety@example.com", "safety12345");
+
+  const requesterHeaders = { authorization: `Bearer ${requester.token}` };
+  const adminHeaders = { authorization: `Bearer ${admin.token}` };
+  const supervisorHeaders = { authorization: `Bearer ${supervisor.token}` };
+  const safetyHeaders = { authorization: `Bearer ${safety.token}` };
+
+  async function createSubmittedPermit(title) {
+    const createResult = await requestJson(server, "/api/permits", {
+      method: "POST",
+      headers: requesterHeaders,
+      body: JSON.stringify({
+        title,
+        workType: "Preventive Maintenance",
+        location: "Plant 1",
+        description: "Routine preventive maintenance.",
+        startDateTime: "2026-06-02T08:00:00+08:00",
+        endDateTime: "2026-06-02T14:00:00+08:00",
+        hazards: ["Preventive Maintenance"],
+        controls: ["barricade"],
+        ppe: ["Hard hat"],
+        approvers: ["PTW Admin"],
+      }),
+    });
+    assert.equal(createResult.response.status, 201);
+
+    const submitResult = await requestJson(server, `/api/permits/${createResult.body.id}/status`, {
+      method: "PATCH",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        status: "submitted",
+        comment: "Admin submitted after Lane 2 draft review",
+      }),
+    });
+    assert.equal(submitResult.response.status, 200);
+
+    const mosApprovalResult = await requestJson(server, `/api/permits/${createResult.body.id}/status`, {
+      method: "PATCH",
+      headers: safetyHeaders,
+      body: JSON.stringify({
+        status: "stage1_complete",
+        comment: "Safety Officer approved MOS Approval",
+      }),
+    });
+    assert.equal(mosApprovalResult.response.status, 200);
+    assert.equal(mosApprovalResult.body.status, "stage1_complete");
+
+    return createResult.body.id;
+  }
+
+  const supervisorPermitId = await createSubmittedPermit("Supervisor Permit Approval");
+  const siteValidationResult = await requestJson(server, `/api/permits/${supervisorPermitId}/site-validation`, {
+    method: "PATCH",
+    headers: supervisorHeaders,
+    body: JSON.stringify({
+      siteValidation: {
+        "hot-work": {
+          checked: {
+            "fire-watch-assigned": true,
+          },
+          notes: "Fire watch positioned at north access.",
+          updatedAt: "2026-07-01T01:00:00.000Z",
+        },
+      },
+    }),
+  });
+  assert.equal(siteValidationResult.response.status, 200);
+  assert.equal(siteValidationResult.body.siteValidation["hot-work"].notes, "Fire watch positioned at north access.");
+
+  const siteValidationReadback = await requestJson(server, `/api/permits/${supervisorPermitId}`, {
+    headers: supervisorHeaders,
+  });
+  assert.equal(siteValidationReadback.response.status, 200);
+  assert.equal(siteValidationReadback.body.siteValidation["hot-work"].notes, "Fire watch positioned at north access.");
+
+  const requesterAttempt = await requestJson(server, `/api/permits/${supervisorPermitId}/status`, {
+    method: "PATCH",
+    headers: requesterHeaders,
+    body: JSON.stringify({
+      status: "approved",
+      comment: "Requester trying to complete Permit Approval",
+    }),
+  });
+  assert.equal(requesterAttempt.response.status, 403);
+  assert.match(requesterAttempt.body.error, /supervisor or safety officer/i);
+
+  const supervisorApproval = await requestJson(server, `/api/permits/${supervisorPermitId}/status`, {
+    method: "PATCH",
+    headers: supervisorHeaders,
+    body: JSON.stringify({
+      status: "approved",
+      comment: "Supervisor approved Permit Approval",
+    }),
+  });
+  assert.equal(supervisorApproval.response.status, 200);
+  assert.equal(supervisorApproval.body.status, "approved");
+
+  const safetyPermitId = await createSubmittedPermit("Safety Permit Approval");
+  const safetyApproval = await requestJson(server, `/api/permits/${safetyPermitId}/status`, {
+    method: "PATCH",
+    headers: safetyHeaders,
+    body: JSON.stringify({
+      status: "approved",
+      comment: "Safety Officer approved Permit Approval",
+    }),
+  });
+  assert.equal(safetyApproval.response.status, 200);
+  assert.equal(safetyApproval.body.status, "approved");
+});
+
+test("expired approved permits cannot be released for work", async (t) => {
+  requireDb(t);
+  const server = await startTestServer();
+  t.after(() => server.close());
+
+  const requester = await loginDemoUser(server, "requester@example.com", "requester12345");
+  const admin = await loginDemoUser(server, "admin@example.com", "admin12345");
+  const supervisor = await loginDemoUser(server, "supervisor@example.com", "supervisor12345");
+
+  const requesterHeaders = { authorization: `Bearer ${requester.token}` };
+  const adminHeaders = { authorization: `Bearer ${admin.token}` };
+  const supervisorHeaders = { authorization: `Bearer ${supervisor.token}` };
+
+  const createResult = await requestJson(server, "/api/permits", {
+    method: "POST",
+    headers: requesterHeaders,
+    body: JSON.stringify({
+      title: "Expired release window",
+      workType: "Corrective Maintenance",
+      location: "Main Plant Alpha",
+      description: "Expired final release should be blocked.",
+      startDateTime: "2026-06-01T08:00:00+08:00",
+      endDateTime: "2026-06-01T12:00:00+08:00",
+      hazards: ["Hot Work"],
+      controls: ["fire watch"],
+      ppe: ["Hard hat"],
+      approvers: ["Sam Supervisor"],
+    }),
+  });
+  assert.equal(createResult.response.status, 201);
+
+  const submitResult = await requestJson(server, `/api/permits/${createResult.body.id}/status`, {
+    method: "PATCH",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      status: "submitted",
+      comment: "Admin submitted expired test permit",
+    }),
+  });
+  assert.equal(submitResult.response.status, 200);
+
+  const approveResult = await requestJson(server, `/api/permits/${createResult.body.id}/status`, {
+    method: "PATCH",
+    headers: supervisorHeaders,
+    body: JSON.stringify({
+      status: "approved",
+      comment: "Supervisor approved Permit Approval",
+    }),
+  });
+  assert.equal(approveResult.response.status, 200);
+  assert.equal(approveResult.body.status, "approved");
+
+  const activateResult = await requestJson(server, `/api/permits/${createResult.body.id}/status`, {
+    method: "PATCH",
+    headers: supervisorHeaders,
+    body: JSON.stringify({
+      status: "active",
+      comment: "Attempting to release expired permit",
+    }),
+  });
+  assert.equal(activateResult.response.status, 409);
+  assert.match(activateResult.body.error, /expired/i);
+});
+
 test("assigned worker can view and close an active permit", async (t) => {
   requireDb(t);
   const server = await startTestServer();
@@ -1418,8 +1876,8 @@ test("assigned worker can view and close an active permit", async (t) => {
       workType: "Hot Work",
       location: "Main Plant Alpha",
       description: "Permit Type: Hot Work\n\nAssigned worker completion flow.",
-      startDateTime: "2026-06-07T08:00:00+08:00",
-      endDateTime: "2026-06-07T12:00:00+08:00",
+      startDateTime: "2026-07-07T08:00:00+08:00",
+      endDateTime: "2026-07-07T12:00:00+08:00",
       hazards: ["Hot Work"],
       controls: ["fire watch"],
       ppe: ["face shield"],
@@ -1532,7 +1990,7 @@ test("assigned worker can view and close an active permit", async (t) => {
   assert.equal(extensionApprove.body.status, "approved");
   assert.equal(
     new Date(extensionApprove.body.permit.endDateTime).toISOString(),
-    new Date("2026-06-07T12:45:00+08:00").toISOString(),
+    new Date("2026-07-07T12:45:00+08:00").toISOString(),
   );
 
   const extendedPermit = await requestJson(server, `/api/permits/${createResult.body.id}`, {
@@ -1542,7 +2000,7 @@ test("assigned worker can view and close an active permit", async (t) => {
   assert.equal(extendedPermit.response.status, 200);
   assert.equal(
     new Date(extendedPermit.body.endDateTime).toISOString(),
-    new Date("2026-06-07T12:45:00+08:00").toISOString(),
+    new Date("2026-07-07T12:45:00+08:00").toISOString(),
   );
 
   const workerExtensions = await requestJson(server, "/api/extension-requests", {
@@ -1790,6 +2248,22 @@ test("requester can revise and resubmit rejected emergency permit", async (t) =>
   assert.equal(rejectResult.response.status, 200);
   assert.equal(rejectResult.body.status, "rejected");
 
+  const unchangedResubmitAttempt = await requestJson(
+    server,
+    `/api/permits/${createResult.body.id}/status`,
+    {
+      method: "PATCH",
+      headers: requesterHeaders,
+      body: JSON.stringify({
+        status: "submitted",
+        comment: "Emergency resubmitted without correction",
+      }),
+    },
+  );
+
+  assert.equal(unchangedResubmitAttempt.response.status, 409);
+  assert.match(unchangedResubmitAttempt.body.error, /must revise/i);
+
   const reviseResult = await requestJson(server, `/api/permits/${createResult.body.id}`, {
     method: "PATCH",
     headers: requesterHeaders,
@@ -1811,6 +2285,7 @@ test("requester can revise and resubmit rejected emergency permit", async (t) =>
 
   assert.equal(reviseResult.response.status, 200);
   assert.equal(reviseResult.body.title, "Emergency compressor isolation revised");
+  assert.equal(reviseResult.body.status, "resubmitted");
 
   const resubmitResult = await requestJson(
     server,
@@ -1829,7 +2304,7 @@ test("requester can revise and resubmit rejected emergency permit", async (t) =>
   assert.equal(resubmitResult.body.status, "submitted");
 });
 
-test("virtual HSE safety officer returns incomplete Stage 1 permit for correction", async (t) => {
+test("virtual HSE safety officer returns incomplete MOS Approval permit for correction", async (t) => {
   requireDb(t);
   const server = await startTestServer();
   t.after(() => server.close());
@@ -1866,7 +2341,7 @@ test("virtual HSE safety officer returns incomplete Stage 1 permit for correctio
       controls: ["Fire watch assigned"],
       ppe: ["Face shield"],
       approvers: ["Sarah Safety"],
-      documents: [{ type: "HIRARC", name: "hot-work-hirarc.pdf" }],
+      documents: [{ type: "JSA", name: "hot-work-jsa.pdf" }],
       assignedWorkers: [],
     }),
   });
@@ -1874,7 +2349,7 @@ test("virtual HSE safety officer returns incomplete Stage 1 permit for correctio
   assert.equal(createResult.response.status, 201);
   assert.equal(createResult.body.workType, "Hot Work");
   assert.deepEqual(createResult.body.documents, [
-    { type: "HIRARC", name: "hot-work-hirarc.pdf" },
+    { type: "JSA", name: "hot-work-jsa.pdf" },
   ]);
 
   const submitResult = await requestJson(
@@ -1899,7 +2374,7 @@ test("virtual HSE safety officer returns incomplete Stage 1 permit for correctio
     {
       method: "POST",
       headers: adminHeaders,
-      body: JSON.stringify({ evaluationStage: "Stage 1" }),
+      body: JSON.stringify({ evaluationStage: "MOS Approval" }),
     },
   );
 
@@ -1912,12 +2387,12 @@ test("virtual HSE safety officer returns incomplete Stage 1 permit for correctio
     {
       method: "POST",
       headers: safetyHeaders,
-      body: JSON.stringify({ evaluationStage: "Stage 1" }),
+      body: JSON.stringify({ evaluationStage: "MOS Approval" }),
     },
   );
 
   assert.equal(reviewResult.response.status, 200);
-  assert.equal(reviewResult.body.evaluation_stage, "Stage 1");
+  assert.equal(reviewResult.body.evaluation_stage, "MOS Approval");
   assert.equal(reviewResult.body.decision, "Return for Correction");
   assert.equal(reviewResult.body.next_workflow_step, "Return/Draft");
   assert.ok(
@@ -1934,6 +2409,19 @@ test("virtual HSE safety officer returns incomplete Stage 1 permit for correctio
 
   assert.equal(permitResult.response.status, 200);
   assert.equal(permitResult.body.status, "rejected");
+  assert.match(permitResult.body.latestRejectionReason, /Virtual HSE Safety Officer MOS Approval/);
+  assert.match(permitResult.body.latestRejectionReason, /returned for correction/i);
+  assert.equal(permitResult.body.latestRejectionByRole, "safety_officer");
+
+  const adminPermitList = await requestJson(server, "/api/permits", {
+    headers: adminHeaders,
+  });
+
+  assert.equal(adminPermitList.response.status, 200);
+  const adminRejectedPermit = adminPermitList.body.permits.find(
+    (permit) => permit.id === createResult.body.id,
+  );
+  assert.match(adminRejectedPermit.latestRejectionReason, /Virtual HSE Safety Officer MOS Approval/);
 });
 
 test("contractor dashboard API is restricted to requester role", async (t) => {

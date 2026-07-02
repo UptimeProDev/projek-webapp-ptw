@@ -13,7 +13,7 @@
   --danger: #b42318;
   --danger-soft: #fde7e4;
   --shadow: 0 12px 28px rgba(16, 24, 32, 0.08);
-  font-family: Inter, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  font-family: Roboto, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
 }
 
 * {
@@ -58,35 +58,14 @@ button {
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
 }
 
-.brand-mark {
-  width: 46px;
-  height: 46px;
-  display: grid;
-  place-items: center;
+.brand-logo {
+  width: 190px;
+  max-width: 100%;
+  height: 72px;
+  object-fit: contain;
   border-radius: 8px;
-  background: #35b779;
-  color: #08120e;
-  font-weight: 900;
-}
-
-.brand h1,
-.brand p {
-  margin: 0;
-}
-
-.brand h1 {
-  font-size: 18px;
-}
-
-.brand p {
-  margin-top: 3px;
-  color: #b9c7d1;
-  font-size: 12px;
-  font-weight: 850;
-  text-transform: uppercase;
 }
 
 .worker-nav {

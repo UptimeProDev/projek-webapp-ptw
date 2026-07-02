@@ -6,9 +6,9 @@ const {
   mapHseDecisionToStatus,
 } = require('./hse-officer');
 
-test('Stage 1 HSE review returns correction when evidence is missing', () => {
+test('MOS Approval HSE review returns correction when evidence is missing', () => {
   const evaluation = buildHseEvaluation({
-    evaluationStage: 'Stage 1',
+    evaluationStage: 'MOS Approval',
     permit: {
       title: 'Pump skid welding',
       workType: 'Hot Work',
@@ -16,23 +16,23 @@ test('Stage 1 HSE review returns correction when evidence is missing', () => {
       description: 'Permit Type: Hot Work\n\nWelding support bracket.',
       hazards: ['Hot Work'],
       controls: ['Fire watch assigned'],
-      documents: [{ type: 'HIRARC', name: 'pump-hirarc.pdf' }],
+      documents: [{ type: 'JSA', name: 'pump-jsa.pdf' }],
       assignedWorkers: [],
       status: 'submitted',
     },
     workers: [],
   });
 
-  assert.equal(evaluation.evaluation_stage, 'Stage 1');
+  assert.equal(evaluation.evaluation_stage, 'MOS Approval');
   assert.equal(evaluation.decision, 'Return for Correction');
   assert.equal(evaluation.next_workflow_step, 'Return/Draft');
   assert.ok(evaluation.flags_detected.some((flag) => flag.includes('Method Statement')));
   assert.ok(evaluation.flags_detected.some((flag) => flag.includes('Worker list')));
 });
 
-test('Stage 1 HSE review approves complete hot work evidence', () => {
+test('MOS Approval HSE review approves complete hot work evidence', () => {
   const evaluation = buildHseEvaluation({
-    evaluationStage: 'Stage 1',
+    evaluationStage: 'MOS Approval',
     permit: {
       title: 'Pump skid welding',
       workType: 'Hot Work',
@@ -45,7 +45,6 @@ test('Stage 1 HSE review approves complete hot work evidence', () => {
       ],
       documents: [
         { type: 'MOS', name: 'method statement.pdf' },
-        { type: 'HIRARC', name: 'pump-hirarc.pdf' },
         { type: 'JSA', name: 'pump-jsa.pdf' },
         { type: 'ERP', name: 'emergency response plan.pdf' },
         { type: 'Hot Work Checklist', name: 'hot work checklist.pdf' },
@@ -72,9 +71,9 @@ test('Stage 1 HSE review approves complete hot work evidence', () => {
   assert.equal(mapHseDecisionToStatus(evaluation), 'stage1_complete');
 });
 
-test('Stage 1 HSE review accepts canonical hot work checklist document type', () => {
+test('MOS Approval HSE review accepts canonical hot work checklist document type', () => {
   const evaluation = buildHseEvaluation({
-    evaluationStage: 'Stage 1',
+    evaluationStage: 'MOS Approval',
     permit: {
       title: 'Pump skid welding',
       workType: 'Hot Work',
@@ -87,7 +86,6 @@ test('Stage 1 HSE review accepts canonical hot work checklist document type', ()
       ],
       documents: [
         { type: 'MOS', name: 'method.pdf' },
-        { type: 'HIRARC', name: 'hazards.pdf' },
         { type: 'JSA', name: 'job-steps.pdf' },
         { type: 'ERP', name: 'response.pdf' },
         { type: 'HOT_WORK_CHECKLIST', name: 'checklist.pdf' },

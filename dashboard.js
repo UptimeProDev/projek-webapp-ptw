@@ -23,17 +23,19 @@ const OFFLINE_TOKEN = "offline-demo-requester";
 const hazardOptions = [
   "Hot Work",
   "Confined Space",
-  "Working at Height",
-  "Electrical",
+  "Electrical Isolation",
+  "Work at Height",
+  "Line Breaking",
   "Chemical Handling",
 ];
 
 const permitTypes = [
   "Hot Work",
   "Confined Space",
-  "Work at Height",
   "Electrical Isolation",
-  "General PTW",
+  "Work at Height",
+  "Line Breaking",
+  "Chemical Handling",
 ];
 
 const defaultControls = [
@@ -119,7 +121,7 @@ function createDefaultDraft() {
     endDateTime: toLocalDateTime(end),
     scope:
       "Welding support brackets and rerouting cable tray near Substation A. Work boundary includes scaffold bay 2 and adjacent isolation panel.",
-    hazards: ["Hot Work", "Working at Height"],
+    hazards: ["Hot Work", "Work at Height"],
     likelihood: 3,
     severity: 3,
     controls: defaultControls,

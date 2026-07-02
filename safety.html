@@ -4,24 +4,20 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Safety Officer Lane 3 | PTW Guardian</title>
-  <link rel="stylesheet" href="/safety.css?v=lane6" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700;900&display=swap" rel="stylesheet">
-</head>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/safety.css?v=lane15" />
+  </head>
 <body>
   <div class="safety-shell">
     <aside class="safety-rail">
       <div class="brand">
-        <div class="brand-mark">HSE</div>
-        <div>
-          <h1>Safety Officer</h1>
-          <p>Lane 3 Technical Risk</p>
-        </div>
+        <img class="brand-logo" src="/assets/ptw-guardian-login-v2.png" alt="PTW Guardian" />
       </div>
 
       <nav class="safety-nav" aria-label="Safety officer work queues">
         <button class="nav-item active" type="button" data-view="all">All Reviews</button>
-        <button class="nav-item" type="button" data-view="stage1">Stage 1 MOS</button>
-        <button class="nav-item" type="button" data-view="stage2">Stage 2 Execution</button>
+        <button class="nav-item" type="button" data-view="stage1">MOS Approval</button>
+        <button class="nav-item" type="button" data-view="stage2">Permit Approval</button>
         <button class="nav-item" type="button" data-view="audit">Review Log</button>
       </nav>
       <div class="rail-footer">
@@ -80,12 +76,12 @@
 
       <section class="summary-grid" aria-label="Safety review summary">
         <article>
-          <span>Stage 1 MOS</span>
+          <span>MOS Approval</span>
           <strong id="stage1Count">0</strong>
           <small>Submitted methodology</small>
         </article>
         <article>
-          <span>Stage 2 Execution</span>
+          <span>Permit Approval</span>
           <strong id="stage2Count">0</strong>
           <small>Scheduled site validation</small>
         </article>
@@ -146,6 +142,15 @@
       </section>
     </main>
   </div>
-  <script src="/safety.js?v=lane6"></script>
+
+  <dialog class="site-checklist-dialog" id="siteChecklistDialog">
+    <form method="dialog">
+      <button class="dialog-close" value="cancel" aria-label="Close site validation checklist">x</button>
+    </form>
+    <div class="site-checklist-dialog-content" id="siteChecklistDialogContent"></div>
+  </dialog>
+
+  <script src="/role-switcher.js?v=3"></script>
+  <script src="/safety.js?v=lane23"></script>
 </body>
 </html>

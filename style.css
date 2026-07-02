@@ -23,9 +23,7 @@ body {
   margin: 0;
   color: var(--ink);
   background: var(--soft);
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+  font-family: Roboto, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
 }
 
 button,
@@ -617,6 +615,245 @@ button {
   min-width: 0;
   overflow-wrap: anywhere;
   font-weight: 800;
+}
+
+.role-selection {
+  display: grid;
+  gap: 10px;
+  margin: -6px 0 22px;
+}
+
+.role-option-button {
+  width: 100%;
+  min-height: 64px;
+  padding: 12px 14px;
+  display: grid;
+  gap: 4px;
+  border: 1px solid #d6dbe0;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: var(--ink);
+  text-align: left;
+}
+
+.role-option-button:hover,
+.role-option-button:focus-visible {
+  border-color: #111820;
+  background: #ffffff;
+}
+
+.role-option-button strong {
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.role-option-button span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.login-brand {
+  display: none;
+}
+
+.auth-shell[data-mode="login"] {
+  min-height: 100svh;
+  display: grid;
+  grid-template-columns: 1fr;
+  place-items: center;
+  padding: 34px;
+  background:
+    radial-gradient(circle at 50% 38%, rgba(0, 118, 255, 0.2), transparent 26%),
+    radial-gradient(circle at 50% 58%, rgba(255, 255, 255, 0.12), transparent 24%),
+    linear-gradient(135deg, #0a0d12 0%, #1b2732 46%, #061018 100%);
+}
+
+.auth-shell[data-mode="login"] .visual-panel {
+  display: none;
+}
+
+.auth-shell[data-mode="login"] .form-panel {
+  min-height: auto;
+  width: min(790px, calc(100vw - 36px));
+  padding: 0;
+  display: block;
+  overflow: visible;
+  background: transparent;
+}
+
+.auth-shell[data-mode="login"] .form-wrap {
+  width: 100%;
+}
+
+.auth-shell[data-mode="login"] .auth-card {
+  min-height: min(795px, calc(100svh - 68px));
+  padding: clamp(28px, 5vw, 70px) clamp(28px, 6vw, 72px);
+  display: grid;
+  align-content: center;
+  border: 1px solid rgba(229, 237, 247, 0.8);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(39, 57, 67, 0.86), rgba(92, 119, 107, 0.72)),
+    rgba(27, 44, 52, 0.82);
+  box-shadow:
+    0 0 38px rgba(255, 255, 255, 0.32),
+    0 28px 90px rgba(0, 0, 0, 0.46);
+  backdrop-filter: blur(12px);
+}
+
+.auth-shell[data-mode="login"] .mode-toggle,
+.auth-shell[data-mode="login"] .form-heading,
+.auth-shell[data-mode="login"] .sso-divider,
+.auth-shell[data-mode="login"] .secondary-button,
+.auth-shell[data-mode="login"] .security-note,
+.auth-shell[data-mode="login"] .switch-copy,
+.auth-shell[data-mode="login"] .form-divider,
+.auth-shell[data-mode="login"] .check-row.compact {
+  display: none;
+}
+
+.auth-shell[data-mode="login"] .login-brand {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  margin: 0 auto clamp(34px, 5vh, 58px);
+  color: #f7fbff;
+  text-align: center;
+}
+
+.auth-shell[data-mode="login"] .login-brand img {
+  width: min(430px, 76vw);
+  max-height: 190px;
+  object-fit: contain;
+  filter: drop-shadow(0 18px 32px rgba(0, 0, 0, 0.5));
+}
+
+.auth-shell[data-mode="login"] .login-brand p {
+  margin: -10px 0 0;
+  color: rgba(255, 255, 255, 0.96);
+  font-size: 22px;
+  font-style: italic;
+  font-weight: 850;
+  text-shadow: 0 3px 12px rgba(0, 0, 0, 0.54);
+}
+
+.auth-shell[data-mode="login"] #loginForm {
+  width: min(650px, 100%);
+  margin: 0 auto;
+}
+
+.auth-shell[data-mode="login"] .session-panel {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #ffffff;
+}
+
+.auth-shell[data-mode="login"] .session-panel h2,
+.auth-shell[data-mode="login"] .session-panel p,
+.auth-shell[data-mode="login"] .session-details dt,
+.auth-shell[data-mode="login"] .session-details dd {
+  color: #ffffff;
+}
+
+.auth-shell[data-mode="login"] .session-details div {
+  border-bottom-color: rgba(233, 242, 255, 0.22);
+}
+
+.auth-shell[data-mode="login"] .session-icon {
+  color: #d7e8ff;
+  background: rgba(0, 118, 255, 0.16);
+}
+
+.auth-shell[data-mode="login"] .role-option-button {
+  border-color: rgba(218, 231, 247, 0.28);
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.auth-shell[data-mode="login"] .role-option-button span {
+  color: rgba(240, 245, 252, 0.76);
+}
+
+.auth-shell[data-mode="login"] .field {
+  margin-bottom: 36px;
+}
+
+.auth-shell[data-mode="login"] .field > span:first-child {
+  display: none;
+}
+
+.auth-shell[data-mode="login"] .input-wrap {
+  min-height: 58px;
+  padding: 0 8px 0 14px;
+  grid-template-columns: 34px 1fr;
+  border: 0;
+  border-bottom: 1px solid rgba(233, 242, 255, 0.5);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.auth-shell[data-mode="login"] .input-wrap.has-action {
+  grid-template-columns: 34px 1fr 38px;
+}
+
+.auth-shell[data-mode="login"] .input-wrap:focus-within {
+  border-color: #1688ff;
+  box-shadow: 0 12px 28px rgba(0, 118, 255, 0.08);
+}
+
+.auth-shell[data-mode="login"] .input-wrap svg,
+.auth-shell[data-mode="login"] .icon-button {
+  color: #f7fbff;
+}
+
+.auth-shell[data-mode="login"] .input-wrap input {
+  color: #ffffff;
+  font-size: 21px;
+  font-weight: 750;
+}
+
+.auth-shell[data-mode="login"] .input-wrap input::placeholder {
+  color: rgba(240, 245, 252, 0.78);
+}
+
+.auth-shell[data-mode="login"] .login-options {
+  justify-content: flex-end;
+  margin: -2px 10px 46px;
+}
+
+.auth-shell[data-mode="login"] .login-options button {
+  color: #ffffff;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.38);
+}
+
+.auth-shell[data-mode="login"] .form-message {
+  min-height: 22px;
+  margin: -22px 10px 20px;
+  color: #ff6a6a;
+  font-weight: 750;
+}
+
+.auth-shell[data-mode="login"] .primary-button {
+  min-height: 47px;
+  border: 0;
+  border-radius: 9px;
+  background: linear-gradient(90deg, rgba(18, 117, 217, 0.8), rgba(128, 154, 149, 0.86));
+  color: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.18);
+}
+
+.auth-shell[data-mode="login"] .primary-button:hover {
+  background: linear-gradient(90deg, rgba(15, 132, 255, 0.92), rgba(151, 172, 165, 0.94));
+}
+
+.auth-shell[data-mode="login"] .form-footer {
+  width: min(790px, calc(100vw - 36px));
+  justify-content: center;
+  color: rgba(235, 241, 248, 0.7);
 }
 
 .form-footer {

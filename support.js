@@ -62,6 +62,21 @@ document.addEventListener('DOMContentLoaded', () => {
       .join(' ');
   }
 
+  function getUserRoles(user) {
+    const roles = Array.isArray(user?.roles) ? user.roles : [user?.role];
+    return roles
+      .map((role) => String(role || '').toLowerCase())
+      .map((role) => role === 'approver' ? 'supervisor' : role)
+      .filter(Boolean)
+      .filter((role, index, list) => list.indexOf(role) === index);
+  }
+
+  function getPreferredRole(user) {
+    const roles = getUserRoles(user);
+    return ['admin', 'safety_officer', 'supervisor', 'requester', 'worker']
+      .find((role) => roles.includes(role)) || user?.role;
+  }
+
   function escapeHtml(value) {
     return String(value ?? '')
       .replace(/&/g, '&amp;')
@@ -119,9 +134,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderUser(user) {
     const resolvedUser = user || session?.user || {};
+    const roles = getUserRoles(resolvedUser);
     const name = resolvedUser.fullName || resolvedUser.email || 'User';
-    elements.backLink.href = roleHome[resolvedUser.role] || '/dashboard';
-    elements.userLine.textContent = `${name} - ${roleLabel(resolvedUser.role)} - ${resolvedUser.email || resolvedUser.employeeId || 'PTW user'}`;
+    elements.backLink.href = roleHome[getPreferredRole(resolvedUser)] || '/dashboard';
+    elements.userLine.textContent = `${name} - ${roles.map(roleLabel).join(', ') || roleLabel(resolvedUser.role)} - ${resolvedUser.email || resolvedUser.employeeId || 'PTW user'}`;
   }
 
   function renderHistory() {

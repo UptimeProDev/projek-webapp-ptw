@@ -7,6 +7,7 @@ const crypto = require('node:crypto');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
+const ExcelJS = require('exceljs');
 const {
   buildHseEvaluation,
   extractPermitType,
@@ -17,6 +18,8 @@ const {
 
 const app = express();
 const port = process.env.PORT || 3000;
+const ACCOUNT_DEACTIVATED_MESSAGE = 'Account deactivated, please contact the admin.';
+const ACCOUNT_PENDING_ACTIVATION_MESSAGE = 'Account pending activation. Open the activation link from Admin to set your password.';
 const MAX_PROFILE_PICTURE_BYTES = 10 * 1024 * 1024;
 const MAX_CERTIFICATION_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const MAX_PERMIT_DOCUMENT_ATTACHMENT_BYTES = 5 * 1024 * 1024;
@@ -36,6 +39,29 @@ const PERMIT_DOCUMENT_ATTACHMENT_MIME_TYPES = new Set([
   'image/jpeg',
   'image/png',
 ]);
+const MOS_JSA_TEMPLATE_VERSION = '2026-06-25';
+const STRUCTURED_PERMIT_DOCUMENT_TYPES = new Set(['MOS', 'JSA']);
+const DIGITAL_DOCUMENT_SOURCE = 'mos-jsa-digital-form';
+const MOS_TEMPLATE_FIELDS = [
+  { key: 'workTitle', label: 'Work Title', help: 'Same title used in the permit request' },
+  { key: 'workLocation', label: 'Work Location', help: 'Plant, unit, area, or equipment location' },
+  { key: 'scope', label: 'Scope of Work', help: 'What work will be done and where the boundary is' },
+  { key: 'methodSteps', label: 'Method Steps', help: 'One method step per line, in sequence' },
+  { key: 'toolsEquipment', label: 'Tools / Equipment', help: 'Tools, machines, access equipment, test equipment' },
+  { key: 'materials', label: 'Materials / Chemicals', help: 'Consumables, chemicals, SDS reference if applicable' },
+  { key: 'isolations', label: 'Isolation / Preparation', help: 'LOTO, drains, barricades, depressurization, cleaning' },
+  { key: 'responsiblePerson', label: 'Responsible Person', help: 'Supervisor or competent person accountable for the work' },
+  { key: 'emergencyArrangement', label: 'Emergency Arrangement', help: 'Emergency contact, muster point, rescue or spill response' },
+];
+const JSA_TEMPLATE_FIELDS = [
+  { key: 'taskStep', label: 'Task Step / Activity', help: 'Task or activity being assessed' },
+  { key: 'permitTypeHazards', label: 'Permit Type / Hazard', help: 'Hot work, confined space, electrical, height, chemical, etc.' },
+  { key: 'potentialConsequence', label: 'Potential Consequence', help: 'What could happen if the hazard is not controlled' },
+  { key: 'controlMeasures', label: 'Control Measures', help: 'Preventive and protective controls required before work' },
+  { key: 'requiredPpe', label: 'Required PPE', help: 'PPE required for the activity' },
+  { key: 'responsiblePerson', label: 'Responsible Person', help: 'Person responsible for the controls' },
+  { key: 'residualRisk', label: 'Residual Risk', help: 'Low, Medium, High, or local risk rating' },
+];
 
 const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
@@ -66,7 +92,9 @@ app.use(express.json({ limit: '80mb' }));
 
 const ROLES = ['requester', 'supervisor', 'safety_officer', 'approver', 'admin', 'worker'];
 const REVIEW_ROLES = new Set(['supervisor', 'safety_officer', 'approver']);
-const PERMIT_CREATORS = new Set(['requester', 'admin', 'worker']);
+const PERMIT_CREATORS = new Set(['requester', 'admin']);
+const ADMIN_ASSIGNABLE_ROLES = ROLES.filter((role) => !['worker', 'approver'].includes(role));
+const APPLICATION_ROLE_PRIORITY = ['admin', 'safety_officer', 'supervisor', 'requester'];
 const PERMIT_STATUSES = [
   'draft',
   'submitted',
@@ -75,6 +103,7 @@ const PERMIT_STATUSES = [
   'active',
   'closed',
   'rejected',
+  'resubmitted',
   'cancelled',
 ];
 
@@ -85,11 +114,13 @@ const STATUS_TRANSITIONS = {
   approved: ['active', 'rejected', 'cancelled'],
   active: ['closed', 'rejected', 'cancelled'],
   closed: [],
-  rejected: ['submitted', 'cancelled'],
+  rejected: ['resubmitted', 'submitted', 'cancelled'],
+  resubmitted: ['submitted', 'cancelled'],
   cancelled: [],
 };
 
 const BCRYPT_ROUNDS = 10;
+const REJECTION_SNAPSHOT_HASH_PREFIX = 'v2:';
 
 function nowIso() {
   return new Date().toISOString();
@@ -288,12 +319,298 @@ function normalizeString(value) {
   return String(value || '').trim();
 }
 
+function normalizeStructuredData(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+
+  return Object.entries(value).reduce((normalized, [key, rawValue]) => {
+    const cleanKey = normalizeString(key);
+    if (!cleanKey) return normalized;
+
+    if (Array.isArray(rawValue)) {
+      const items = rawValue.map((item) => normalizeString(item)).filter(Boolean);
+      if (items.length) normalized[cleanKey] = items;
+      return normalized;
+    }
+
+    const cleanValue = normalizeString(rawValue);
+    if (cleanValue) normalized[cleanKey] = cleanValue;
+    return normalized;
+  }, {});
+}
+
+function getTemplateFieldsForDocumentType(type) {
+  if (normalizeString(type).toUpperCase() === 'MOS') return MOS_TEMPLATE_FIELDS;
+  if (normalizeString(type).toUpperCase() === 'JSA') return JSA_TEMPLATE_FIELDS;
+  return [];
+}
+
+function addDigitalFormSheet(workbook, sheetName, fields, structuredData = {}) {
+  const sheet = workbook.addWorksheet(sheetName);
+  sheet.columns = [
+    { header: 'Field Key', key: 'key', width: 24 },
+    { header: 'Field Label', key: 'label', width: 32 },
+    { header: 'Value', key: 'value', width: 60 },
+    { header: 'Help', key: 'help', width: 52 },
+  ];
+
+  sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF17212B' } };
+  sheet.getRow(1).alignment = { vertical: 'middle' };
+  sheet.views = [{ state: 'frozen', ySplit: 1 }];
+
+  fields.forEach((field) => {
+    const row = sheet.addRow({
+      key: field.key,
+      label: field.label,
+      value: structuredData[field.key] || '',
+      help: field.help,
+    });
+    row.getCell('value').alignment = { vertical: 'top', wrapText: true };
+    row.getCell('help').font = { color: { argb: 'FF64748B' } };
+  });
+
+  sheet.eachRow((row) => {
+    row.eachCell((cell) => {
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+      };
+    });
+  });
+
+  return sheet;
+}
+
+function createMosJsaTemplateWorkbook(documents = []) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'PTW Guardian';
+  workbook.created = new Date();
+  workbook.modified = new Date();
+
+  const instructions = workbook.addWorksheet('Instructions');
+  instructions.columns = [
+    { header: 'Item', key: 'item', width: 24 },
+    { header: 'Instruction', key: 'instruction', width: 88 },
+  ];
+  instructions.addRow({
+    item: 'Purpose',
+    instruction: 'Fill the MOS and JSA sheets using the Value column only. Do not rename sheet names or field keys.',
+  });
+  instructions.addRow({
+    item: 'Import',
+    instruction: 'Upload the completed Excel file in the PTW permit form. The system reads the Field Key and Value columns back into the permit database.',
+  });
+  instructions.addRow({
+    item: 'Version',
+    instruction: MOS_JSA_TEMPLATE_VERSION,
+  });
+  instructions.getRow(1).font = { bold: true };
+
+  const normalizedDocuments = normalizePermitDocuments(documents);
+  const mosData = normalizeStructuredData(normalizedDocuments.find((document) => document.type === 'MOS')?.structuredData);
+  const jsaData = normalizeStructuredData(normalizedDocuments.find((document) => document.type === 'JSA')?.structuredData);
+
+  addDigitalFormSheet(workbook, 'MOS', MOS_TEMPLATE_FIELDS, mosData);
+  addDigitalFormSheet(workbook, 'JSA', JSA_TEMPLATE_FIELDS, jsaData);
+
+  return workbook;
+}
+
+function excelCellToString(cell) {
+  const value = cell?.value;
+  if (value == null) return '';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return normalizeString(value);
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === 'object') {
+    if ('text' in value) return normalizeString(value.text);
+    if ('result' in value) return normalizeString(value.result);
+    if (Array.isArray(value.richText)) return normalizeString(value.richText.map((part) => part.text || '').join(''));
+  }
+  return normalizeString(value);
+}
+
+function parseDigitalFormSheet(workbook, type, name) {
+  const sheet = workbook.getWorksheet(type);
+  const fields = getTemplateFieldsForDocumentType(type);
+  const allowedKeys = new Set(fields.map((field) => field.key));
+  const structuredData = {};
+
+  if (!sheet) return null;
+
+  sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (rowNumber === 1) return;
+    const key = excelCellToString(row.getCell(1));
+    const value = excelCellToString(row.getCell(3));
+    if (allowedKeys.has(key) && value) {
+      structuredData[key] = value;
+    }
+  });
+
+  return {
+    type,
+    name,
+    source: DIGITAL_DOCUMENT_SOURCE,
+    templateVersion: MOS_JSA_TEMPLATE_VERSION,
+    structuredData,
+  };
+}
+
+async function parseMosJsaTemplate(attachmentData) {
+  const workbook = new ExcelJS.Workbook();
+  const buffer = Buffer.from(normalizeString(attachmentData), 'base64');
+  await workbook.xlsx.load(buffer);
+
+  return [
+    parseDigitalFormSheet(workbook, 'MOS', 'MOS digital form'),
+    parseDigitalFormSheet(workbook, 'JSA', 'JSA digital form'),
+  ].filter(Boolean);
+}
+
 function normalizeArray(value) {
   if (!Array.isArray(value)) {
     return [];
   }
 
   return value.map((item) => normalizeString(item)).filter(Boolean);
+}
+
+function normalizeSiteValidation(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+
+  const normalized = {};
+  Object.entries(value).forEach(([rawKey, rawRecord]) => {
+    const key = normalizeString(rawKey);
+    if (!key || !rawRecord || typeof rawRecord !== 'object' || Array.isArray(rawRecord)) return;
+
+    if (key === '_siteFields') {
+      const attendance = rawRecord.attendance && typeof rawRecord.attendance === 'object' && !Array.isArray(rawRecord.attendance)
+        ? Object.entries(rawRecord.attendance).reduce((map, [workerId, present]) => {
+            const cleanWorkerId = normalizeString(workerId);
+            if (cleanWorkerId) map[cleanWorkerId] = Boolean(present);
+            return map;
+          }, {})
+        : {};
+      normalized[key] = {
+        actualWorkDate: normalizeString(rawRecord.actualWorkDate),
+        location: normalizeString(rawRecord.location),
+        attendance,
+        updatedAt: normalizeString(rawRecord.updatedAt || nowIso()),
+      };
+      return;
+    }
+
+    const checked = rawRecord.checked && typeof rawRecord.checked === 'object' && !Array.isArray(rawRecord.checked)
+      ? Object.entries(rawRecord.checked).reduce((map, [itemId, checkedValue]) => {
+          const cleanItemId = normalizeString(itemId);
+          if (cleanItemId) map[cleanItemId] = Boolean(checkedValue);
+          return map;
+        }, {})
+      : {};
+    normalized[key] = {
+      checked,
+      notes: normalizeString(rawRecord.notes),
+      updatedAt: normalizeString(rawRecord.updatedAt || nowIso()),
+      updatedBy: normalizeString(rawRecord.updatedBy),
+    };
+  });
+
+  return normalized;
+}
+
+function normalizeComparableArray(value) {
+  return normalizeArray(value).map((item) => item.toLowerCase()).sort();
+}
+
+function normalizeComparableDocuments(documents = [], description = '') {
+  return normalizePermitDocuments(documents, description)
+    .map((document) => ({
+      type: normalizeString(document.type).toLowerCase(),
+      name: normalizeString(document.name).toLowerCase(),
+      fileName: normalizeString(document.fileName).toLowerCase(),
+      mimeType: normalizeString(document.mimeType).toLowerCase(),
+      hasAttachment: Boolean(document.hasAttachment || document.attachmentData || document.attachmentPath),
+      newAttachmentHash: normalizeString(document.attachmentData)
+        ? crypto.createHash('sha256').update(normalizeString(document.attachmentData)).digest('hex')
+        : '',
+    }))
+    .sort((a, b) => `${a.type}:${a.name}`.localeCompare(`${b.type}:${b.name}`));
+}
+
+function extractComparableScope(description) {
+  const documentTypes = new Set([
+    'MOS',
+    'HIRARC',
+    'JSA',
+    'ERP',
+    'HOT_WORK_CHECKLIST',
+    'CONFINED_SPACE_ENTRY',
+    'RESCUE_PLAN',
+    'WAH_PLAN',
+    'LOTO_PLAN',
+    'ELECTRICAL_CERTIFICATE',
+    'LIFTING_PLAN',
+    'EXCAVATION_PERMIT',
+    'UTILITY_SCAN',
+    'SDS',
+    'ISOLATION_PLAN',
+  ]);
+
+  return String(description || '')
+    .split('\n')
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (/^(Permit Class|Review Route|Permit Type|Assigned Workers|Assigned Worker IDs|Required Documents):/i.test(trimmed)) {
+        return false;
+      }
+
+      const documentMatch = trimmed.match(/^([A-Z_]+):/);
+      return !documentMatch || !documentTypes.has(documentMatch[1].toUpperCase());
+    })
+    .join('\n')
+    .trim();
+}
+
+function buildPermitRevisionSnapshot(source) {
+  const description = normalizeString(source.description);
+
+  return {
+    title: normalizeString(source.title),
+    workType: normalizeString(source.workType || source.permitType || extractPermitType(source)),
+    location: normalizeString(source.location),
+    description: extractComparableScope(description),
+    startDateTime: normalizeString(source.startDateTime),
+    endDateTime: normalizeString(source.endDateTime),
+    hazards: normalizeComparableArray(normalizePermitHazards(source)),
+    controls: normalizeComparableArray(source.controls),
+    ppe: normalizeComparableArray(source.ppe),
+    approvers: normalizeComparableArray(source.approvers),
+    assignedWorkers: normalizeComparableArray(normalizeAssignedWorkers(source.assignedWorkers)),
+    isEmergency: Boolean(source.isEmergency),
+    documents: normalizeComparableDocuments(source.documents, description),
+  };
+}
+
+function hasPermitDetailChanges(currentPermit, payload) {
+  return JSON.stringify(buildPermitRevisionSnapshot(currentPermit)) !== JSON.stringify(buildPermitRevisionSnapshot(payload));
+}
+
+function permitRevisionHash(permit) {
+  const hash = crypto
+    .createHash('sha256')
+    .update(JSON.stringify(buildPermitRevisionSnapshot(permit)))
+    .digest('hex');
+  return `${REJECTION_SNAPSHOT_HASH_PREFIX}${hash}`;
+}
+
+function hasPermitChangedSinceRejection(permit) {
+  const rejectionSnapshotHash = normalizeString(permit?.rejectionSnapshotHash);
+  return rejectionSnapshotHash.startsWith(REJECTION_SNAPSHOT_HASH_PREFIX) && permitRevisionHash(permit) !== rejectionSnapshotHash;
 }
 
 function normalizeIdentityName(value) {
@@ -459,7 +776,7 @@ const WORKER_PERMIT_TYPES = [
   'Electrical Isolation',
   'Work at Height',
   'Line Breaking',
-  'General Maintenance',
+  'Chemical Handling',
 ];
 
 function permitTypeKey(value) {
@@ -483,8 +800,8 @@ const WORKER_PERMIT_ALIASES = new Map(
     ['WAH', 'Work at Height'],
     ['Line Breaking', 'Line Breaking'],
     ['Line Break', 'Line Breaking'],
-    ['General Maintenance', 'General Maintenance'],
-    ['Maintenance', 'General Maintenance'],
+    ['Chemical Handling', 'Chemical Handling'],
+    ['Chemical', 'Chemical Handling'],
   ].map(([alias, canonical]) => [permitTypeKey(alias), canonical]),
 );
 
@@ -647,6 +964,12 @@ function normalizePermitDocumentsForStorage(documents = [], description = '', ex
       attachmentData = '';
     }
 
+    const structuredData = Object.keys(normalizeStructuredData(document.structuredData)).length
+      ? normalizeStructuredData(document.structuredData)
+      : normalizeStructuredData(existing?.structuredData);
+    const hasStructuredData = STRUCTURED_PERMIT_DOCUMENT_TYPES.has(normalizeString(document.type).toUpperCase())
+      && Object.keys(structuredData).length > 0;
+
     return {
       id: documentId,
       type: normalizeString(document.type),
@@ -656,6 +979,11 @@ function normalizePermitDocumentsForStorage(documents = [], description = '', ex
       attachmentData,
       attachmentPath,
       hasAttachment: Boolean(attachmentData || attachmentPath),
+      ...(hasStructuredData ? { structuredData } : {}),
+      ...(hasStructuredData ? { source: normalizeString(document.source || existing?.source || DIGITAL_DOCUMENT_SOURCE) } : {}),
+      ...(hasStructuredData
+        ? { templateVersion: normalizeString(document.templateVersion || existing?.templateVersion || MOS_JSA_TEMPLATE_VERSION) }
+        : {}),
     };
   });
 }
@@ -665,13 +993,22 @@ function serializePermitDocuments(documents = [], options = {}) {
 
   return normalizePermitDocuments(documents).map((document) => {
     const hasAttachment = Boolean(document.hasAttachment || document.attachmentData || document.attachmentPath);
+    const structuredData = normalizeStructuredData(document.structuredData);
+    const hasStructuredData =
+      STRUCTURED_PERMIT_DOCUMENT_TYPES.has(normalizeString(document.type).toUpperCase())
+      && Object.keys(structuredData).length > 0;
     return {
       type: document.type,
       name: document.name,
-      ...(hasAttachment && normalizeString(document.id) ? { id: normalizeString(document.id) } : {}),
+      ...((hasAttachment || hasStructuredData) && normalizeString(document.id) ? { id: normalizeString(document.id) } : {}),
       ...(hasAttachment && normalizeString(document.fileName) ? { fileName: normalizeString(document.fileName) } : {}),
       ...(hasAttachment && normalizeString(document.mimeType) ? { mimeType: normalizeString(document.mimeType) } : {}),
       ...(hasAttachment ? { hasAttachment } : {}),
+      ...(hasStructuredData ? { structuredData } : {}),
+      ...(hasStructuredData ? { source: normalizeString(document.source || DIGITAL_DOCUMENT_SOURCE) } : {}),
+      ...(hasStructuredData
+        ? { templateVersion: normalizeString(document.templateVersion || MOS_JSA_TEMPLATE_VERSION) }
+        : {}),
       ...(includeAttachmentData && normalizeString(document.attachmentData)
         ? { attachmentData: normalizeString(document.attachmentData) }
         : {}),
@@ -783,6 +1120,7 @@ async function initializeDatabase() {
       email VARCHAR(255) NOT NULL UNIQUE,
       organization VARCHAR(255) NOT NULL,
       role VARCHAR(50) NOT NULL,
+      roles LONGTEXT NULL,
       password_hash VARCHAR(255) NOT NULL,
       token VARCHAR(128) UNIQUE,
       account_status VARCHAR(40) NOT NULL DEFAULT 'active',
@@ -805,6 +1143,7 @@ async function initializeDatabase() {
   `);
 
   await ensureTableColumn('users', 'account_status', "account_status VARCHAR(40) NOT NULL DEFAULT 'active' AFTER token");
+  await ensureTableColumn('users', 'roles', 'roles LONGTEXT NULL AFTER role');
   await ensureTableColumn('users', 'activation_token', 'activation_token VARCHAR(128) NULL AFTER account_status');
   await ensureTableColumn('users', 'activation_expires_at', 'activation_expires_at VARCHAR(40) NULL AFTER activation_token');
   await ensureTableColumn('users', 'activated_at', 'activated_at VARCHAR(40) NULL AFTER activation_expires_at');
@@ -839,6 +1178,8 @@ async function initializeDatabase() {
       is_emergency TINYINT(1) NOT NULL DEFAULT 0,
       documents LONGTEXT NOT NULL,
       assigned_workers LONGTEXT NOT NULL,
+      site_validation LONGTEXT,
+      rejection_snapshot_hash VARCHAR(80),
       status VARCHAR(40) NOT NULL,
       created_at VARCHAR(40) NOT NULL,
       updated_at VARCHAR(40) NOT NULL,
@@ -875,6 +1216,18 @@ async function initializeDatabase() {
     'assigned_workers',
     'assigned_workers LONGTEXT NULL AFTER documents',
   );
+  await ensureTableColumn(
+    'permits',
+    'site_validation',
+    'site_validation LONGTEXT NULL AFTER assigned_workers',
+  );
+  await ensureTableColumn(
+    'permits',
+    'rejection_snapshot_hash',
+    'rejection_snapshot_hash VARCHAR(80) NULL AFTER assigned_workers',
+  );
+  await pool.query('ALTER TABLE permits MODIFY COLUMN rejection_snapshot_hash VARCHAR(80) NULL');
+  await backfillRejectedPermitSnapshotHashes();
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS workers (
@@ -1034,13 +1387,15 @@ function rowToUser(row) {
     return null;
   }
 
+  const roles = normalizeUserRoles(decodeJson(row.roles), row.role);
   return {
     id: row.id,
     employeeId: row.employee_id,
     fullName: row.full_name,
     email: row.email,
     organization: row.organization,
-    role: row.role,
+    role: roles[0] || row.role,
+    roles,
     accountStatus: row.account_status || 'active',
     activationToken: row.activation_token || '',
     activationExpiresAt: row.activation_expires_at || '',
@@ -1060,6 +1415,36 @@ function rowToUser(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function normalizeUserRoles(roles, primaryRole = '') {
+  const incoming = Array.isArray(roles) ? roles : [roles];
+  const normalized = [];
+  const addRole = (role) => {
+    const cleanRole = normalizeString(role);
+    if (!ROLES.includes(cleanRole) || normalized.includes(cleanRole)) return;
+    normalized.push(cleanRole);
+  };
+
+  addRole(primaryRole);
+  incoming.forEach(addRole);
+  return normalized;
+}
+
+function hasRole(user, role) {
+  return normalizeUserRoles(user?.roles, user?.role).includes(role);
+}
+
+function hasAnyRole(user, roles = []) {
+  return roles.some((role) => hasRole(user, role));
+}
+
+function sortApplicationRoles(roles) {
+  return [...roles].sort((a, b) => {
+    const aIndex = APPLICATION_ROLE_PRIORITY.indexOf(a);
+    const bIndex = APPLICATION_ROLE_PRIORITY.indexOf(b);
+    return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
+  });
 }
 
 function rowToPermit(row) {
@@ -1084,6 +1469,8 @@ function rowToPermit(row) {
     isEmergency: Boolean(row.is_emergency),
     documents: serializePermitDocuments(normalizePermitDocuments(decodeJson(row.documents), row.description)),
     assignedWorkers: normalizeAssignedWorkers(decodeJson(row.assigned_workers)),
+    siteValidation: normalizeSiteValidation(decodeJson(row.site_validation)),
+    rejectionSnapshotHash: row.rejection_snapshot_hash || '',
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -1168,6 +1555,8 @@ function rowToWorker(row, options = {}) {
     certifications: serializeWorkerCertifications(decodeJson(row.certifications), options),
     expiry: row.expiry,
     status: row.status,
+    accountStatus: row.account_status || '',
+    accountActivatedAt: row.account_activated_at || '',
     reviewComment: row.review_comment || '',
     createdBy: row.created_by,
     createdByName: row.created_by_name || '',
@@ -1184,9 +1573,14 @@ async function getAllWorkers(connection = pool, options = {}) {
       workers.*,
       users.full_name AS created_by_name,
       users.email AS created_by_email,
-      users.employee_id AS created_by_employee_id
+      users.employee_id AS created_by_employee_id,
+      worker_users.account_status AS account_status,
+      worker_users.activated_at AS account_activated_at
     FROM workers
     LEFT JOIN users ON users.id = workers.created_by
+    LEFT JOIN users worker_users
+      ON worker_users.role = 'worker'
+      AND LOWER(worker_users.email) = LOWER(workers.email)
     ORDER BY workers.created_at DESC
   `);
   return rows.map((row) => rowToWorker(row, options));
@@ -1227,9 +1621,14 @@ async function insertWorker(payload, user, connection = pool) {
       workers.*,
       users.full_name AS created_by_name,
       users.email AS created_by_email,
-      users.employee_id AS created_by_employee_id
+      users.employee_id AS created_by_employee_id,
+      worker_users.account_status AS account_status,
+      worker_users.activated_at AS account_activated_at
     FROM workers
     LEFT JOIN users ON users.id = workers.created_by
+    LEFT JOIN users worker_users
+      ON worker_users.role = 'worker'
+      AND LOWER(worker_users.email) = LOWER(workers.email)
     WHERE workers.id = ?
     LIMIT 1
   `,
@@ -1247,9 +1646,14 @@ async function getWorkerById(id, connection = pool, options = {}) {
       workers.*,
       users.full_name AS created_by_name,
       users.email AS created_by_email,
-      users.employee_id AS created_by_employee_id
+      users.employee_id AS created_by_employee_id,
+      worker_users.account_status AS account_status,
+      worker_users.activated_at AS account_activated_at
     FROM workers
     LEFT JOIN users ON users.id = workers.created_by
+    LEFT JOIN users worker_users
+      ON worker_users.role = 'worker'
+      AND LOWER(worker_users.email) = LOWER(workers.email)
     WHERE workers.id = ?
     LIMIT 1
   `,
@@ -1308,6 +1712,65 @@ async function updateWorkerStatus(id, status, reviewComment = '') {
   return await getWorkerById(id);
 }
 
+async function deactivateLinkedWorkerAccount(worker, connection = pool) {
+  const email = normalizeEmail(worker?.email);
+  if (!email) return null;
+
+  const timestamp = nowIso();
+  await connection.execute(
+    `
+    UPDATE users
+    SET
+      account_status = 'inactive',
+      token = NULL,
+      updated_at = ?
+    WHERE role = 'worker'
+      AND LOWER(email) = LOWER(?)
+  `,
+    [timestamp, email],
+  );
+
+  return getUserByEmail(email, connection);
+}
+
+async function activateLinkedWorkerAccount(userId, connection = pool) {
+  const timestamp = nowIso();
+  await connection.execute(
+    `
+    UPDATE users
+    SET
+      account_status = 'active',
+      activation_token = NULL,
+      activation_expires_at = NULL,
+      updated_at = ?
+    WHERE id = ?
+  `,
+    [timestamp, userId],
+  );
+
+  return getUserById(userId, connection);
+}
+
+function workerReferenceValues(worker) {
+  return new Set(
+    [worker?.id, worker?.employeeId, worker?.name, worker?.email]
+      .map((value) => normalizeString(value).toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+async function workerHasPermitHistory(worker, connection = pool) {
+  const references = workerReferenceValues(worker);
+  if (!references.size) return false;
+
+  const [rows] = await connection.execute('SELECT assigned_workers FROM permits');
+  return rows.some((row) =>
+    normalizeAssignedWorkers(decodeJson(row.assigned_workers)).some((assignedWorker) =>
+      references.has(normalizeString(assignedWorker).toLowerCase()),
+    ),
+  );
+}
+
 async function ensureApprovedWorkerAccount(worker) {
   const email = normalizeEmail(worker?.email);
   const employeeId = normalizeString(worker?.employeeId);
@@ -1347,12 +1810,18 @@ async function ensureApprovedWorkerAccount(worker) {
   }
 
   if (existing.accountStatus === 'pending_activation') {
-    const activation = await setUserActivationPending(existing.id);
-    const user = await getUserByEmail(email);
+    const user = await activateLinkedWorkerAccount(existing.id);
     return {
       created: false,
-      activationToken: activation.activationToken,
-      activationExpiresAt: activation.activationExpiresAt,
+      user: sanitizeUser(user),
+    };
+  }
+
+  if (existing.accountStatus === 'inactive') {
+    const user = await activateLinkedWorkerAccount(existing.id);
+    return {
+      created: false,
+      activationRequired: false,
       user: sanitizeUser(user),
     };
   }
@@ -1371,7 +1840,33 @@ function sanitizeUser(user) {
 
 function canViewWorker(user, worker) {
   if (!user || !worker) return false;
-  return isAdmin(user) || worker.status === 'valid' || worker.createdBy === user.id;
+  const status = String(worker.status || '').toLowerCase();
+  return isAdmin(user) || ['valid', 'inactive'].includes(status) || worker.createdBy === user.id;
+}
+
+async function assertAssignedWorkersAssignable(assignedWorkers = [], connection = pool) {
+  const references = normalizeAssignedWorkers(assignedWorkers).map((worker) => normalizeString(worker).toLowerCase());
+  if (!references.length) return;
+
+  const [workers] = await connection.execute(`
+    SELECT id, employee_id, name, email, status
+    FROM workers
+    WHERE status = 'inactive'
+  `);
+
+  const inactiveMatches = workers.filter((worker) =>
+    [worker.id, worker.employee_id, worker.name, worker.email]
+      .map((value) => normalizeString(value).toLowerCase())
+      .some((value) => value && references.includes(value)),
+  );
+
+  if (inactiveMatches.length) {
+    const error = new Error(
+      `Inactive worker cannot be assigned: ${inactiveMatches.map((worker) => worker.name || worker.employee_id || worker.id).join(', ')}`,
+    );
+    error.status = 400;
+    throw error;
+  }
 }
 
 async function createEmployeeId(connection = pool) {
@@ -1382,6 +1877,16 @@ async function createEmployeeId(connection = pool) {
   `);
 
   return `EMP-${String(rows[0].next_id).padStart(5, '0')}`;
+}
+
+async function createWorkerEmployeeId(connection = pool) {
+  const [rows] = await connection.execute(`
+    SELECT COALESCE(MAX(CAST(SUBSTRING(employee_id, 2) AS UNSIGNED)), 0) + 1 AS next_id
+    FROM users
+    WHERE employee_id REGEXP '^W[0-9]+$'
+  `);
+
+  return `W${String(rows[0].next_id).padStart(5, '0')}`;
 }
 
 async function getUserByEmail(email, connection = pool) {
@@ -1411,6 +1916,28 @@ async function getUserByToken(token) {
   return rowToUser(rows[0]);
 }
 
+async function hasInactiveWorkerProfile(user, connection = pool) {
+  if (user?.role !== 'worker') return false;
+
+  const email = normalizeEmail(user.email);
+  const employeeId = normalizeString(user.employeeId).toLowerCase();
+  const [rows] = await connection.execute(
+    `
+    SELECT id
+    FROM workers
+    WHERE status = 'inactive'
+      AND (
+        LOWER(email) = LOWER(?)
+        OR LOWER(employee_id) = ?
+      )
+    LIMIT 1
+  `,
+    [email, employeeId],
+  );
+
+  return rows.length > 0;
+}
+
 async function updateUserToken(userId, token) {
   await pool.execute('UPDATE users SET token = ?, updated_at = ? WHERE id = ?', [
     token,
@@ -1424,16 +1951,33 @@ async function getUserById(id, connection = pool) {
   return rowToUser(rows[0]);
 }
 
+async function getAllUsers(connection = pool) {
+  const [rows] = await connection.execute('SELECT * FROM users ORDER BY full_name');
+  return rows.map(rowToUser);
+}
+
+async function updateUserRoles(userId, roles, connection = pool) {
+  const existing = await getUserById(userId, connection);
+  if (!existing) return null;
+
+  const normalizedRoles = normalizeUserRoles(roles);
+  const primaryRole = normalizedRoles[0] || existing.role;
+  await connection.execute(
+    'UPDATE users SET role = ?, roles = ?, updated_at = ? WHERE id = ?',
+    [primaryRole, encodeJson(normalizedRoles), nowIso(), userId],
+  );
+  return getUserById(userId, connection);
+}
+
 async function getUsersByRoles(roles, connection = pool) {
   const roleList = Array.isArray(roles) ? roles.map(normalizeString).filter(Boolean) : [];
   if (!roleList.length) return [];
 
-  const placeholders = roleList.map(() => '?').join(', ');
   const [rows] = await connection.execute(
-    `SELECT * FROM users WHERE role IN (${placeholders}) AND account_status = 'active' ORDER BY full_name`,
-    roleList,
+    'SELECT * FROM users WHERE account_status = ? ORDER BY full_name',
+    ['active'],
   );
-  return rows.map(rowToUser);
+  return rows.map(rowToUser).filter((user) => hasAnyRole(user, roleList));
 }
 
 async function getUsersByEmployeeIds(employeeIds, connection = pool) {
@@ -1664,6 +2208,7 @@ async function activateUserAccount(activationToken, password) {
 async function syncWorkerUserFromProfile(worker, connection = pool) {
   const email = normalizeEmail(worker?.email);
   const employeeId = normalizeString(worker?.employeeId);
+  const status = normalizeString(worker?.status).toLowerCase();
   if (!email || !employeeId) return;
 
   await connection.execute(
@@ -1686,12 +2231,31 @@ async function syncWorkerUserFromProfile(worker, connection = pool) {
   `,
     [employeeId, nowIso(), email, employeeId, employeeId, email],
   );
+
+  if (status === 'inactive') {
+    await deactivateLinkedWorkerAccount(worker, connection);
+  } else if (status === 'valid') {
+    await connection.execute(
+      `
+      UPDATE users
+      SET
+        account_status = 'active',
+        activation_token = NULL,
+        activation_expires_at = NULL,
+        updated_at = ?
+      WHERE role = 'worker'
+        AND LOWER(email) = LOWER(?)
+        AND account_status <> 'active'
+    `,
+      [nowIso(), email],
+    );
+  }
 }
 
 async function syncWorkerUsersFromProfiles(connection = pool) {
   const [workers] = await connection.execute(
     `
-    SELECT employee_id AS employeeId, email
+    SELECT employee_id AS employeeId, email, status
     FROM workers
     WHERE email IS NOT NULL
       AND email <> ''
@@ -1705,12 +2269,14 @@ async function syncWorkerUsersFromProfiles(connection = pool) {
   }
 }
 
-async function insertUser({ employeeId, fullName, email, organization, role, password }, connection = pool) {
+async function insertUser({ employeeId, fullName, email, organization, role, roles, password }, connection = pool) {
   const id = createId();
   const timestamp = nowIso();
   let resolvedEmployeeId = employeeId;
+  const normalizedRoles = normalizeUserRoles(roles, role);
+  const primaryRole = normalizedRoles[0] || role;
 
-  if (!resolvedEmployeeId && role === 'worker') {
+  if (!resolvedEmployeeId && primaryRole === 'worker') {
     const [matchingWorkers] = await connection.execute(
       `
       SELECT employee_id
@@ -1726,7 +2292,11 @@ async function insertUser({ employeeId, fullName, email, organization, role, pas
     resolvedEmployeeId = matchingWorkers[0]?.employee_id;
   }
 
-  resolvedEmployeeId = resolvedEmployeeId || (await createEmployeeId(connection));
+  resolvedEmployeeId = resolvedEmployeeId || (
+    primaryRole === 'worker'
+      ? await createWorkerEmployeeId(connection)
+      : await createEmployeeId(connection)
+  );
 
   await connection.execute(
     `
@@ -1737,12 +2307,13 @@ async function insertUser({ employeeId, fullName, email, organization, role, pas
       email,
       organization,
       role,
+      roles,
       password_hash,
       token,
       created_at,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
   `,
     [
       id,
@@ -1750,7 +2321,8 @@ async function insertUser({ employeeId, fullName, email, organization, role, pas
       normalizeString(fullName),
       normalizeEmail(email),
       normalizeString(organization),
-      role,
+      primaryRole,
+      encodeJson(normalizedRoles),
       hashPassword(password),
       timestamp,
       timestamp,
@@ -1841,7 +2413,7 @@ async function seedDemoWorkers() {
       phone: '',
       email: 'thyaaworker@example.com',
       company: 'Global Engineering',
-      permits: ['Hot Work', 'General Maintenance', 'Work at Height'],
+      permits: ['Hot Work', 'Chemical Handling', 'Work at Height'],
       certifications: [
         {
           type: 'Safety Induction',
@@ -1886,10 +2458,52 @@ async function getPermitById(id) {
   return rowToPermit(rows[0]);
 }
 
+async function backfillRejectedPermitSnapshotHashes() {
+  const [rows] = await pool.execute(
+    `
+    SELECT *
+    FROM permits
+    WHERE status = 'rejected'
+      AND (
+        rejection_snapshot_hash IS NULL
+        OR rejection_snapshot_hash = ''
+        OR rejection_snapshot_hash NOT LIKE ?
+      )
+  `,
+    [`${REJECTION_SNAPSHOT_HASH_PREFIX}%`],
+  );
+
+  for (const row of rows) {
+    const permit = rowToPermit(row);
+    await pool.execute(
+      'UPDATE permits SET rejection_snapshot_hash = ? WHERE id = ?',
+      [permitRevisionHash(permit), permit.id],
+    );
+  }
+}
+
 async function getStoredPermitDocuments(id, connection = pool) {
   const [rows] = await connection.execute('SELECT documents, description FROM permits WHERE id = ? LIMIT 1', [id]);
   if (!rows[0]) return [];
   return normalizePermitDocuments(decodeJson(rows[0].documents), rows[0].description);
+}
+
+async function updatePermitSiteValidation(permit, siteValidation, user, connection = pool) {
+  const mergedSiteValidation = normalizeSiteValidation({
+    ...(permit.siteValidation || {}),
+    ...(siteValidation || {}),
+  });
+  const updatedAt = nowIso();
+  await connection.execute(
+    'UPDATE permits SET site_validation = ?, updated_at = ? WHERE id = ?',
+    [encodeJson(mergedSiteValidation), updatedAt, permit.id],
+  );
+  return {
+    ...permit,
+    siteValidation: mergedSiteValidation,
+    updatedAt,
+    siteValidationUpdatedBy: sanitizeUser(user),
+  };
 }
 
 async function getAuditLogs(permitId, connection = pool) {
@@ -1904,6 +2518,39 @@ async function getAuditLogs(permitId, connection = pool) {
   );
 
   return rows.map(rowToAuditLog);
+}
+
+function latestRejectionLog(logs) {
+  return [...logs].reverse().find((log) => log.action === 'status changed' && log.status === 'rejected') || null;
+}
+
+async function withPermitRevisionState(permit) {
+  if (!permit || permit.status !== 'rejected') {
+    return permit;
+  }
+
+  const logs = await getAuditLogs(permit.id);
+  const rejectionLog = latestRejectionLog(logs);
+
+  const rejectedPermit = {
+    ...permit,
+    latestRejectionReason: rejectionLog?.comment || '',
+    latestRejectionBy: rejectionLog?.by || '',
+    latestRejectionByRole: rejectionLog?.byRole || '',
+    latestRejectionAt: rejectionLog?.when || '',
+  };
+
+  if (isEmergencyPermit(permit)) {
+    return rejectedPermit;
+  }
+
+  const hasRequesterRevision = hasPermitChangedSinceRejection(permit);
+
+  return {
+    ...rejectedPermit,
+    hasRequesterRevisionAfterLatestRejection: hasRequesterRevision,
+    needsRequesterRevisionBeforeAdminSubmit: !hasRequesterRevision,
+  };
 }
 
 async function insertAuditLog(
@@ -1986,11 +2633,11 @@ async function getExtensionRequestsForUser(user) {
 }
 
 function canCreateExtensionRequest(user, permit) {
-  return isAssignedWorker(user, permit) || user.role === 'supervisor' || user.role === 'approver' || isAdmin(user);
+  return isAssignedWorker(user, permit) || hasAnyRole(user, ['supervisor', 'approver']) || isAdmin(user);
 }
 
 function canDecideExtensionRequest(user) {
-  return user.role === 'supervisor' || user.role === 'approver' || isAdmin(user);
+  return hasAnyRole(user, ['supervisor', 'approver']) || isAdmin(user);
 }
 
 async function insertExtensionRequest(permit, user, { requestedMinutes, reason }) {
@@ -2128,6 +2775,7 @@ async function insertPermit(payload, user) {
 
   try {
     await connection.beginTransaction();
+    await assertAssignedWorkersAssignable(payload.assignedWorkers, connection);
 
     await connection.execute(
       `
@@ -2212,7 +2860,20 @@ async function updatePermitDetails(permit, payload, user) {
 
   try {
     await connection.beginTransaction();
+    await assertAssignedWorkersAssignable(payload.assignedWorkers, connection);
     const existingDocuments = await getStoredPermitDocuments(permit.id, connection);
+    const isRejectedRequesterRevision =
+      permit.status === 'rejected' &&
+      hasRole(user, 'requester') &&
+      permit.requestedById === user.id;
+
+    if (isRejectedRequesterRevision && !hasPermitDetailChanges(permit, payload)) {
+      const error = new Error('Change at least one rejected permit detail before resubmitting for review');
+      error.status = 409;
+      throw error;
+    }
+
+    const nextStatus = isRejectedRequesterRevision ? 'resubmitted' : permit.status;
 
     await connection.execute(
       `
@@ -2231,6 +2892,7 @@ async function updatePermitDetails(permit, payload, user) {
         is_emergency = ?,
         documents = ?,
         assigned_workers = ?,
+        status = ?,
         updated_at = ?
       WHERE id = ?
     `,
@@ -2254,10 +2916,21 @@ async function updatePermitDetails(permit, payload, user) {
           ),
         ),
         encodeJson(normalizeAssignedWorkers(payload.assignedWorkers)),
+        nextStatus,
         timestamp,
         permit.id,
       ],
     );
+
+    if (
+      isRejectedRequesterRevision &&
+      !normalizeString(permit.rejectionSnapshotHash).startsWith(REJECTION_SNAPSHOT_HASH_PREFIX)
+    ) {
+      await connection.execute(
+        'UPDATE permits SET rejection_snapshot_hash = ? WHERE id = ?',
+        [permitRevisionHash(permit), permit.id],
+      );
+    }
 
     await insertAuditLog(
       {
@@ -2267,7 +2940,7 @@ async function updatePermitDetails(permit, payload, user) {
         actorRole: user.role,
         action: 'details updated',
         fromStatus: permit.status,
-        toStatus: permit.status,
+        toStatus: nextStatus,
         comment:
           permit.status === 'rejected'
             ? 'Rejected permit revised by requester'
@@ -2275,6 +2948,22 @@ async function updatePermitDetails(permit, payload, user) {
       },
       connection,
     );
+
+    if (nextStatus !== permit.status) {
+      await insertAuditLog(
+        {
+          permitId: permit.id,
+          actorUserId: user.id,
+          actorName: user.fullName,
+          actorRole: user.role,
+          action: 'status changed',
+          fromStatus: permit.status,
+          toStatus: nextStatus,
+          comment: 'Requester resubmitted corrected permit details',
+        },
+        connection,
+      );
+    }
 
     await connection.commit();
 
@@ -2300,10 +2989,13 @@ async function updatePermitStatus(permit, nextStatus, user, comment) {
 
   try {
     await connection.beginTransaction();
+    const timestamp = nowIso();
+    const rejectionSnapshotHash = nextStatus === 'rejected' ? permitRevisionHash(permit) : null;
 
-    await connection.execute('UPDATE permits SET status = ?, updated_at = ? WHERE id = ?', [
+    await connection.execute('UPDATE permits SET status = ?, updated_at = ?, rejection_snapshot_hash = ? WHERE id = ?', [
       nextStatus,
-      nowIso(),
+      timestamp,
+      rejectionSnapshotHash,
       permit.id,
     ]);
 
@@ -2336,15 +3028,15 @@ async function updatePermitStatus(permit, nextStatus, user, comment) {
 }
 
 function isAdmin(user) {
-  return user.role === 'admin';
+  return hasRole(user, 'admin');
 }
 
 function isReviewer(user) {
-  return REVIEW_ROLES.has(user.role);
+  return hasAnyRole(user, Array.from(REVIEW_ROLES));
 }
 
 function canRunHseReview(user) {
-  return user.role === 'safety_officer';
+  return hasRole(user, 'safety_officer');
 }
 
 function normalizeIdentifier(value) {
@@ -2352,7 +3044,7 @@ function normalizeIdentifier(value) {
 }
 
 function isAssignedWorker(user, permit) {
-  if (user.role !== 'worker') return false;
+  if (!hasRole(user, 'worker')) return false;
 
   const userIdentifiers = new Set(
     [user.employeeId, user.fullName, user.email]
@@ -2373,7 +3065,7 @@ function canViewPermit(user, permit) {
   if (isEmergencyPermit(permit)) {
     return (
       permit.requestedById === user.id ||
-      (user.role === 'safety_officer' && permit.status !== 'draft') ||
+      (hasRole(user, 'safety_officer') && permit.status !== 'draft') ||
       canWorkerAccessPermit(user, permit)
     );
   }
@@ -2382,13 +3074,13 @@ function canViewPermit(user, permit) {
 }
 
 function canCreatePermit(user) {
-  return PERMIT_CREATORS.has(user.role);
+  return hasAnyRole(user, Array.from(PERMIT_CREATORS));
 }
 
 function canUpdatePermitDetails(user, permit) {
   return (
     isAdmin(user) ||
-    (user.role === 'requester' &&
+    (hasRole(user, 'requester') &&
       permit.requestedById === user.id &&
       ['draft', 'rejected'].includes(permit.status))
   );
@@ -2451,9 +3143,9 @@ async function notifyPermitStatusChanged(permit, previousStatus, actorUser) {
       : 'Permit submitted for review';
     message = `${title} is waiting for ${isEmergencyPermit(permit) ? 'Safety Officer' : 'Supervisor/Safety'} review.`;
   } else if (permit.status === 'stage1_complete') {
-    recipients = await getUsersByRoles(['safety_officer']);
-    notificationTitle = 'Permit ready for Safety Stage 2';
-    message = `${title} completed Stage 1 and needs Safety Officer review.`;
+    recipients = await getUsersByRoles(['supervisor', 'safety_officer']);
+    notificationTitle = 'Permit ready for Permit Approval';
+    message = `${title} completed MOS Approval and needs Supervisor/Safety review.`;
   } else if (permit.status === 'approved') {
     recipients = uniqueUsers([requester, ...assignedWorkers, ...(await getUsersByRoles(['supervisor']))]);
     notificationTitle = 'Permit approved';
@@ -2466,6 +3158,10 @@ async function notifyPermitStatusChanged(permit, previousStatus, actorUser) {
     recipients = requester ? [requester] : [];
     notificationTitle = 'Permit needs revision';
     message = `${title} was returned for revision.`;
+  } else if (permit.status === 'resubmitted') {
+    recipients = uniqueUsers([requester, ...(await getUsersByRoles(['admin']))]);
+    notificationTitle = 'Permit resubmitted';
+    message = `${title} was corrected and resubmitted for Admin Lane 2 review.`;
   } else if (permit.status === 'closed') {
     recipients = uniqueUsers([requester, ...assignedWorkers]);
     notificationTitle = 'Permit closed';
@@ -2513,16 +3209,20 @@ async function notifyWorkerReviewed(worker, actorUser) {
     worker.createdBy ? await getUserById(worker.createdBy) : null,
     worker.email ? await getUserByEmail(worker.email) : null,
   ]);
-  const isValid = String(worker.status || '').toLowerCase() === 'valid';
+  const workerStatus = String(worker.status || '').toLowerCase();
+  const isValid = workerStatus === 'valid';
+  const isInactive = workerStatus === 'inactive';
 
   await createNotificationsForUsers(
     recipients,
     {
-      type: isValid ? 'worker_valid' : 'worker_rejected',
-      title: isValid ? 'Worker profile approved' : 'Worker profile returned',
+      type: isValid ? 'worker_valid' : isInactive ? 'worker_inactive' : 'worker_reviewed',
+      title: isValid ? 'Worker profile approved' : isInactive ? 'Worker profile deactivated' : 'Worker profile updated',
       message: isValid
         ? `${worker.name} is approved for PTW assignment.`
-        : `${worker.name} needs worker profile revision.`,
+        : isInactive
+          ? `${worker.name} is inactive and cannot be assigned to new permits.`
+          : `${worker.name} worker profile status changed.`,
       linkByRole: (role) => workerProfileLinkForRole(role),
       entityType: 'worker',
       entityId: worker.id,
@@ -2532,7 +3232,7 @@ async function notifyWorkerReviewed(worker, actorUser) {
 }
 
 function requireRequester(req, res, next) {
-  if (req.user.role !== 'requester') {
+  if (!hasRole(req.user, 'requester')) {
     return res.status(403).json({
       error: 'Contractor dashboard is available to requester users only',
       yourRole: req.user.role,
@@ -2543,7 +3243,7 @@ function requireRequester(req, res, next) {
 }
 
 function requireApprover(req, res, next) {
-  if (req.user.role !== 'approver') {
+  if (!hasAnyRole(req.user, ['approver', 'supervisor'])) {
     return res.status(403).json({
       error: 'Supervisor command center is available to supervisor users only',
       yourRole: req.user.role,
@@ -2564,7 +3264,7 @@ function buildRequesterDashboard(user, permits) {
   });
 
   const activePermits = permits
-    .filter((permit) => ['active', 'approved', 'stage1_complete', 'submitted'].includes(permit.status))
+    .filter((permit) => ['active', 'approved', 'stage1_complete', 'submitted', 'resubmitted'].includes(permit.status))
     .slice(0, 5);
 
   return {
@@ -2572,7 +3272,7 @@ function buildRequesterDashboard(user, permits) {
     site: 'Main Plant Alpha (Sector 4)',
     stats: {
       draftPermits: counts.draft || 0,
-      pendingApproval: (counts.submitted || 0) + (counts.stage1_complete || 0),
+      pendingApproval: (counts.submitted || 0) + (counts.resubmitted || 0) + (counts.stage1_complete || 0),
       approvedPermits: (counts.approved || 0) + (counts.active || 0),
       expiringCertificates: 0,
       totalActivePermits: activePermits.length,
@@ -2592,6 +3292,11 @@ function isPermitDueWithin(permit, hours) {
 
   const diff = end.getTime() - Date.now();
   return diff > 0 && diff <= hours * 60 * 60 * 1000;
+}
+
+function isPermitExpired(permit) {
+  const end = new Date(permit?.endDateTime);
+  return !Number.isNaN(end.getTime()) && end.getTime() <= Date.now();
 }
 
 function classifyApproverPermit(permit) {
@@ -2627,7 +3332,7 @@ function classifyApproverPermit(permit) {
 }
 
 function buildApproverDashboard(user, permits) {
-  const commandStatuses = new Set(['submitted', 'approved', 'active', 'rejected']);
+  const commandStatuses = new Set(['submitted', 'approved', 'active', 'rejected', 'resubmitted']);
   const commandPermits = permits.filter(
     (permit) => !permit.isEmergency && commandStatuses.has(permit.status),
   );
@@ -2646,7 +3351,7 @@ function buildApproverDashboard(user, permits) {
       };
     })
     .sort((a, b) => {
-      const priority = { approved: 0, submitted: 1, rejected: 2, active: 3 };
+      const priority = { approved: 0, submitted: 1, resubmitted: 2, rejected: 3, active: 4 };
       const statusDelta = (priority[a.status] ?? 9) - (priority[b.status] ?? 9);
       if (statusDelta) return statusDelta;
       return new Date(a.startDateTime) - new Date(b.startDateTime);
@@ -2656,7 +3361,7 @@ function buildApproverDashboard(user, permits) {
     user: sanitizeUser(user),
     stats: {
       pendingApprovals: commandPermits.filter((permit) =>
-        ['submitted', 'approved', 'rejected'].includes(permit.status),
+        ['submitted', 'approved', 'rejected', 'resubmitted'].includes(permit.status),
       ).length,
       approvedPermits: approvedCycle.length,
       activeWork: activePermits.length,
@@ -2670,7 +3375,7 @@ function buildApproverDashboard(user, permits) {
   };
 }
 
-function getTransitionDecision(user, permit, nextStatus) {
+async function getTransitionDecision(user, permit, nextStatus) {
   const allowedNextStatuses = STATUS_TRANSITIONS[permit.status] || [];
 
   if (!allowedNextStatuses.includes(nextStatus)) {
@@ -2683,11 +3388,36 @@ function getTransitionDecision(user, permit, nextStatus) {
     };
   }
 
+  if (permit.status === 'approved' && nextStatus === 'active' && isPermitExpired(permit)) {
+    return {
+      allowed: false,
+      httpStatus: 409,
+      error: 'Permit window has expired. Return for reschedule or approve an extension before releasing work.',
+      currentStatus: permit.status,
+    };
+  }
+
+  if (
+    isAdmin(user) &&
+    ['rejected', 'resubmitted'].includes(permit.status) &&
+    nextStatus === 'submitted' &&
+    !isEmergencyPermit(permit)
+  ) {
+    if (permit.status === 'rejected' && !hasPermitChangedSinceRejection(permit)) {
+      return {
+        allowed: false,
+        httpStatus: 409,
+        error: 'Requester must revise this rejected permit before Admin Lane 2 can resubmit it',
+        currentStatus: permit.status,
+      };
+    }
+  }
+
   if (isAdmin(user)) {
     return { allowed: true };
   }
 
-  const isOwnerRequester = user.role === 'requester' && permit.requestedById === user.id;
+  const isOwnerRequester = hasRole(user, 'requester') && permit.requestedById === user.id;
 
   if (permit.status === 'draft' && ['submitted', 'cancelled'].includes(nextStatus)) {
     if (nextStatus === 'submitted') {
@@ -2722,22 +3452,22 @@ function getTransitionDecision(user, permit, nextStatus) {
       return {
         allowed: false,
         httpStatus: 409,
-        error: 'Emergency permits do not use the normal Stage 1 completion lane',
+        error: 'Emergency permits do not use the normal MOS Approval completion lane',
       };
     }
 
-    return user.role === 'safety_officer'
+    return hasRole(user, 'safety_officer')
       ? { allowed: true }
       : {
           allowed: false,
           httpStatus: 403,
-          error: 'Only the safety officer can complete Stage 1 review',
+          error: 'Only the safety officer can complete MOS Approval review',
         };
   }
 
   if (permit.status === 'submitted' && ['approved', 'rejected'].includes(nextStatus)) {
     if (isEmergencyPermit(permit)) {
-      return user.role === 'safety_officer'
+      return hasRole(user, 'safety_officer')
         ? { allowed: true }
         : {
             allowed: false,
@@ -2746,7 +3476,7 @@ function getTransitionDecision(user, permit, nextStatus) {
           };
     }
 
-    return user.role === 'supervisor' || user.role === 'safety_officer'
+    return hasAnyRole(user, ['supervisor', 'safety_officer'])
       ? { allowed: true }
       : {
           allowed: false,
@@ -2756,12 +3486,12 @@ function getTransitionDecision(user, permit, nextStatus) {
   }
 
   if (permit.status === 'stage1_complete' && ['approved', 'rejected', 'cancelled'].includes(nextStatus)) {
-    return user.role === 'safety_officer' || isAdmin(user)
+    return hasAnyRole(user, ['supervisor', 'safety_officer']) || isAdmin(user)
       ? { allowed: true }
       : {
           allowed: false,
           httpStatus: 403,
-          error: 'Only the safety officer can complete Stage 2 or return this permit',
+          error: 'Only the supervisor or safety officer can complete Permit Approval or return this permit',
         };
   }
 
@@ -2775,15 +3505,37 @@ function getTransitionDecision(user, permit, nextStatus) {
         };
   }
 
-  if (permit.status === 'rejected' && ['submitted', 'cancelled'].includes(nextStatus)) {
+  if (permit.status === 'rejected' && ['resubmitted', 'submitted', 'cancelled'].includes(nextStatus)) {
+    if (nextStatus === 'resubmitted') {
+      return isOwnerRequester && hasPermitChangedSinceRejection(permit)
+        ? { allowed: true }
+        : {
+            allowed: false,
+            httpStatus: isOwnerRequester ? 409 : 403,
+            error: isOwnerRequester
+              ? 'Requester must revise this rejected permit before marking it resubmitted'
+              : 'Only the requester who created this rejected permit can mark it resubmitted',
+            currentStatus: permit.status,
+          };
+    }
+
     if (nextStatus === 'submitted') {
       if (isEmergencyPermit(permit)) {
-        return isOwnerRequester
+        if (!isOwnerRequester) {
+          return {
+            allowed: false,
+            httpStatus: 403,
+            error: 'Only the requester who created this emergency permit can re-submit it to Safety Officer review',
+          };
+        }
+
+        return hasPermitChangedSinceRejection(permit)
           ? { allowed: true }
           : {
               allowed: false,
-              httpStatus: 403,
-              error: 'Only the requester who created this emergency permit can re-submit it to Safety Officer review',
+              httpStatus: 409,
+              error: 'Requester must revise this rejected emergency permit before resubmitting it to Safety Officer review',
+              currentStatus: permit.status,
             };
       }
 
@@ -2803,9 +3555,39 @@ function getTransitionDecision(user, permit, nextStatus) {
         };
   }
 
+  if (permit.status === 'resubmitted' && ['submitted', 'cancelled'].includes(nextStatus)) {
+    if (nextStatus === 'submitted') {
+      if (isEmergencyPermit(permit)) {
+        return isOwnerRequester
+          ? { allowed: true }
+          : {
+              allowed: false,
+              httpStatus: 403,
+              error: 'Only the requester who corrected this emergency permit can re-submit it to Safety Officer review',
+            };
+      }
+
+      return isAdmin(user)
+        ? { allowed: true }
+        : {
+            allowed: false,
+            httpStatus: 403,
+            error: 'Resubmitted normal permits must be submitted by Admin Lane 2',
+          };
+    }
+
+    return isOwnerRequester || isAdmin(user)
+      ? { allowed: true }
+      : {
+          allowed: false,
+          httpStatus: 403,
+          error: 'Only the requester who created this resubmitted permit or admin can cancel it',
+        };
+  }
+
   if (permit.status === 'approved' && ['active', 'rejected', 'cancelled'].includes(nextStatus)) {
     if (isEmergencyPermit(permit)) {
-      return user.role === 'safety_officer'
+      return hasRole(user, 'safety_officer')
         ? { allowed: true }
         : {
             allowed: false,
@@ -2815,7 +3597,7 @@ function getTransitionDecision(user, permit, nextStatus) {
     }
 
     if (nextStatus === 'active') {
-      return user.role === 'supervisor'
+      return hasRole(user, 'supervisor')
         ? { allowed: true }
         : {
             allowed: false,
@@ -2872,6 +3654,14 @@ async function authenticate(req, res, next) {
 
   if (!user) {
     return res.status(401).json({ error: 'Invalid token' });
+  }
+
+  if (user.accountStatus === 'inactive' || await hasInactiveWorkerProfile(user)) {
+    return res.status(403).json({ error: ACCOUNT_DEACTIVATED_MESSAGE });
+  }
+
+  if (user.accountStatus !== 'active') {
+    return res.status(403).json({ error: ACCOUNT_PENDING_ACTIVATION_MESSAGE });
   }
 
   req.user = user;
@@ -3055,10 +3845,22 @@ app.post('/api/auth/login', async (req, res) => {
 
   const user = await getUserByLogin(login);
 
+  if (await hasInactiveWorkerProfile(user)) {
+    return res.status(403).json({
+      error: ACCOUNT_DEACTIVATED_MESSAGE,
+    });
+  }
+
   if (user?.accountStatus === 'pending_activation') {
     return res.status(403).json({
-      error: 'Account pending activation. Open the activation link from Admin to set your password.',
+      error: ACCOUNT_PENDING_ACTIVATION_MESSAGE,
       activationRequired: true,
+    });
+  }
+
+  if (user?.accountStatus === 'inactive') {
+    return res.status(403).json({
+      error: ACCOUNT_DEACTIVATED_MESSAGE,
     });
   }
 
@@ -3103,6 +3905,64 @@ app.post('/api/auth/activate', async (req, res) => {
 
 app.get('/api/auth/me', authenticate, (req, res) => {
   res.json({ user: sanitizeUser(req.user) });
+});
+
+app.get('/api/users', authenticate, async (req, res) => {
+  if (!isAdmin(req.user)) {
+    return res.status(403).json({
+      error: 'Only Admin can manage user roles',
+      yourRole: req.user.role,
+    });
+  }
+
+  const users = (await getAllUsers())
+    .filter((user) => !hasRole(user, 'worker'))
+    .map(sanitizeUser);
+
+  res.json({
+    count: users.length,
+    users,
+    data: users,
+    assignableRoles: ADMIN_ASSIGNABLE_ROLES,
+  });
+});
+
+app.patch('/api/users/:id/roles', authenticate, async (req, res) => {
+  if (!isAdmin(req.user)) {
+    return res.status(403).json({
+      error: 'Only Admin can manage user roles',
+      yourRole: req.user.role,
+    });
+  }
+
+  const existing = await getUserById(req.params.id);
+  if (!existing) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  if (hasRole(existing, 'worker')) {
+    return res.status(409).json({
+      error: 'Worker accounts are managed from Worker Review and cannot receive application access roles here',
+    });
+  }
+
+  const requestedRoles = sortApplicationRoles(
+    normalizeUserRoles(req.body?.roles || req.body?.role)
+      .filter((role) => ADMIN_ASSIGNABLE_ROLES.includes(role)),
+  );
+  if (!requestedRoles.length) {
+    return res.status(400).json({
+      error: 'Select at least one application role',
+      allowedRoles: ADMIN_ASSIGNABLE_ROLES,
+    });
+  }
+
+  if (existing.id === req.user.id && !requestedRoles.includes('admin')) {
+    return res.status(400).json({ error: 'You cannot remove your own Admin role' });
+  }
+
+  const user = await updateUserRoles(existing.id, requestedRoles);
+  return res.json({ user: sanitizeUser(user) });
 });
 
 app.get('/api/notifications', authenticate, async (req, res) => {
@@ -3233,8 +4093,8 @@ app.get('/api/workers', authenticate, async (req, res) => {
 });
 
 app.post('/api/workers', authenticate, async (req, res) => {
-  if (!isAdmin(req.user) && req.user.role !== 'requester') {
-    return res.status(403).json({ error: 'Only requester or admin may submit worker profiles' });
+  if (!isAdmin(req.user)) {
+    return res.status(403).json({ error: 'Only admin may add worker profiles' });
   }
 
   const {
@@ -3273,9 +4133,7 @@ app.post('/api/workers', authenticate, async (req, res) => {
 
   try {
     const requestedStatus = normalizeString(status);
-    const initialStatus = isAdmin(req.user)
-      ? requestedStatus || 'valid'
-      : 'submitted';
+    const initialStatus = requestedStatus || 'valid';
     const worker = await insertWorker(
       {
         name,
@@ -3311,7 +4169,7 @@ app.post('/api/workers', authenticate, async (req, res) => {
 app.patch('/api/workers/:id', authenticate, async (req, res) => {
   const noworker = await getWorkerById(req.params.id, pool, { includeAttachmentData: true });
   if (!noworker) return res.status(404).json({ error: 'Worker not found' });
-  const isOwnerRequester = req.user.role === 'requester' && noworker.createdBy === req.user.id;
+  const isOwnerRequester = hasRole(req.user, 'requester') && noworker.createdBy === req.user.id;
   if (!isAdmin(req.user) && !isOwnerRequester) {
     return res.status(403).json({ error: 'Only the requester owner or admin may update this worker profile' });
   }
@@ -3394,84 +4252,30 @@ app.patch('/api/workers/:id/status', authenticate, async (req, res) => {
   if (!worker) return res.status(404).json({ error: 'Worker not found' });
 
   const status = normalizeString(req.body?.status);
-  if (!['valid', 'rejected'].includes(status)) {
-    return res.status(400).json({ error: 'Worker review status must be valid or rejected' });
+  if (!['valid', 'inactive'].includes(status)) {
+    return res.status(400).json({ error: 'Worker status must be valid or inactive' });
   }
 
-  const reviewComment = status === 'rejected'
-    ? normalizeString(req.body?.reviewComment || req.body?.comment)
+  const reviewComment = status === 'inactive'
+    ? normalizeString(req.body?.reviewComment || req.body?.comment || 'Deactivated by Admin')
     : '';
   const updated = await updateWorkerStatus(worker.id, status, reviewComment);
   const workerAccount = status === 'valid' ? await ensureApprovedWorkerAccount(updated) : null;
+  const inactiveAccount = status === 'inactive' ? await deactivateLinkedWorkerAccount(updated) : null;
   await safelyNotify('worker reviewed', () => notifyWorkerReviewed(updated, req.user));
-  if (workerAccount?.activationToken) {
-    workerAccount.activationLink = buildActivationLink(req, workerAccount.activationToken);
-    workerAccount.delivery = await deliverActivationInvite({
-      worker: updated,
-      user: workerAccount.user,
-      activationLink: workerAccount.activationLink,
-      activationExpiresAt: workerAccount.activationExpiresAt,
-    });
+  if (workerAccount) {
+    return res.json({ ...updated, workerAccount });
   }
-  return res.json(workerAccount ? { ...updated, workerAccount } : updated);
-});
-
-app.post('/api/workers/:id/activation-link', authenticate, async (req, res) => {
-  if (!isAdmin(req.user)) {
-    return res.status(403).json({ error: 'Only admin may resend worker activation links' });
-  }
-
-  const worker = await getWorkerById(req.params.id);
-  if (!worker) return res.status(404).json({ error: 'Worker not found' });
-
-  if (String(worker.status || '').toLowerCase() !== 'valid') {
-    return res.status(400).json({ error: 'Worker profile must be valid before activation link can be sent' });
-  }
-
-  const email = normalizeEmail(worker.email);
-  if (!email) {
-    return res.status(400).json({ error: 'Worker email is required before activation link can be sent' });
-  }
-
-  let user = await getUserByEmail(email);
-  if (!user || user.role !== 'worker') {
-    const workerAccount = await ensureApprovedWorkerAccount(worker);
-    if (workerAccount.skipped) {
-      return res.status(400).json({ error: workerAccount.reason });
-    }
-    const activationLink = buildActivationLink(req, workerAccount.activationToken);
-    const delivery = await deliverActivationInvite({
-      worker,
-      user: workerAccount.user,
-      activationLink,
-      activationExpiresAt: workerAccount.activationExpiresAt,
-    });
+  if (inactiveAccount) {
     return res.json({
-      activationLink,
-      activationExpiresAt: workerAccount.activationExpiresAt,
-      delivery,
-      user: workerAccount.user,
+      ...updated,
+      workerAccount: {
+        deactivated: true,
+        user: sanitizeUser(inactiveAccount),
+      },
     });
   }
-
-  await syncWorkerUserFromProfile(worker);
-  const activation = await setUserActivationPending(user.id);
-  user = await getUserById(user.id);
-
-  const activationLink = buildActivationLink(req, activation.activationToken);
-  const delivery = await deliverActivationInvite({
-    worker,
-    user: sanitizeUser(user),
-    activationLink,
-    activationExpiresAt: activation.activationExpiresAt,
-  });
-
-  res.json({
-    activationLink,
-    activationExpiresAt: activation.activationExpiresAt,
-    delivery,
-    user: sanitizeUser(user),
-  });
+  return res.json(updated);
 });
 
 app.get('/api/workers/:id/certifications/:certificationId/download', authenticate, async (req, res) => {
@@ -3512,14 +4316,15 @@ app.get('/api/workers/:id/certifications/:certificationId/download', authenticat
 app.delete('/api/workers/:id', authenticate, async (req, res) => {
   const noworker = await getWorkerById(req.params.id);
   if (!noworker) return res.status(404).json({ error: 'Worker not found' });
-  const isOwnerRequester = req.user.role === 'requester' && noworker.createdBy === req.user.id;
 
-  if (!isAdmin(req.user) && !isOwnerRequester) {
-    return res.status(403).json({ error: 'Only the requester owner or admin may delete this worker profile' });
+  if (!isAdmin(req.user)) {
+    return res.status(403).json({ error: 'Only admin may delete worker profiles' });
   }
 
-  if (isOwnerRequester && noworker.status === 'valid') {
-    return res.status(403).json({ error: 'Approved worker profiles must be removed by Admin' });
+  if (await workerHasPermitHistory(noworker)) {
+    return res.status(409).json({
+      error: 'Worker has permit history and cannot be deleted. Deactivate the worker instead.',
+    });
   }
 
   await deleteWorker(req.params.id);
@@ -3528,7 +4333,12 @@ app.delete('/api/workers/:id', authenticate, async (req, res) => {
 
 app.get('/api/permits', authenticate, async (req, res) => {
   const [rows] = await pool.execute('SELECT * FROM permits ORDER BY created_at DESC');
-  const visiblePermits = rows.map(rowToPermit).filter((permit) => canViewPermit(req.user, permit));
+  const visiblePermits = await Promise.all(
+    rows
+      .map(rowToPermit)
+      .filter((permit) => canViewPermit(req.user, permit))
+      .map(withPermitRevisionState),
+  );
 
   res.json({
     count: visiblePermits.length,
@@ -3555,6 +4365,9 @@ app.post('/api/permits', authenticate, async (req, res) => {
     const permit = await insertPermit(req.body, req.user);
     return res.status(201).json(permit);
   } catch (e) {
+    if (e?.status) {
+      return res.status(e.status).json({ error: e.message });
+    }
     if (e instanceof Error && /permit document file|unsupported permit document/i.test(e.message)) {
       return res.status(400).json({ error: e.message });
     }
@@ -3586,10 +4399,82 @@ app.patch('/api/permits/:id', authenticate, async (req, res) => {
     const updatedPermit = await updatePermitDetails(permit, req.body, req.user);
     return res.json(updatedPermit);
   } catch (e) {
+    if (e?.status) {
+      return res.status(e.status).json({ error: e.message });
+    }
     if (e instanceof Error && /permit document file|unsupported permit document/i.test(e.message)) {
       return res.status(400).json({ error: e.message });
     }
     throw e;
+  }
+});
+
+app.patch('/api/permits/:id/site-validation', authenticate, async (req, res) => {
+  const permit = await getPermitById(req.params.id);
+
+  if (!permit) {
+    return res.status(404).json({ error: 'Permit not found' });
+  }
+
+  if (!canViewPermit(req.user, permit)) {
+    return res.status(403).json({ error: 'You are not allowed to access this permit' });
+  }
+
+  if (!isReviewer(req.user) && !isAdmin(req.user)) {
+    return res.status(403).json({ error: 'Only supervisor, safety officer, approver, or admin can save site validation' });
+  }
+
+  const siteValidation = normalizeSiteValidation(req.body?.siteValidation || req.body || {});
+  const updatedPermit = await updatePermitSiteValidation(permit, siteValidation, req.user);
+  return res.json({
+    siteValidation: updatedPermit.siteValidation,
+    permit: await withPermitRevisionState(updatedPermit),
+  });
+});
+
+app.get('/api/permit-document-templates/mos-jsa.xlsx', authenticate, async (req, res) => {
+  const workbook = createMosJsaTemplateWorkbook();
+  const buffer = await workbook.xlsx.writeBuffer();
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', buildContentDisposition('MOS-JSA-digital-form-template.xlsx'));
+  return res.send(Buffer.from(buffer));
+});
+
+app.post('/api/permit-document-templates/mos-jsa/export', authenticate, async (req, res) => {
+  const documents = normalizePermitDocuments(req.body?.documents || []).filter((document) =>
+    STRUCTURED_PERMIT_DOCUMENT_TYPES.has(normalizeString(document.type).toUpperCase()),
+  );
+  const workbook = createMosJsaTemplateWorkbook(documents);
+  const buffer = await workbook.xlsx.writeBuffer();
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', buildContentDisposition('MOS-JSA-digital-form-template.xlsx'));
+  return res.send(Buffer.from(buffer));
+});
+
+app.post('/api/permit-document-templates/mos-jsa/import', authenticate, async (req, res) => {
+  try {
+    const attachmentData = normalizeString(req.body?.attachmentData || req.body?.fileData || req.body?.contentBase64);
+
+    if (!attachmentData) {
+      return res.status(400).json({ error: 'Upload a completed MOS/JSA Excel template' });
+    }
+
+    if (decodeBase64Size(attachmentData) > MAX_PERMIT_DOCUMENT_ATTACHMENT_BYTES) {
+      return res.status(400).json({ error: 'MOS/JSA Excel template exceeds 5 MB limit' });
+    }
+
+    const documents = (await parseMosJsaTemplate(attachmentData)).filter((document) =>
+      Object.keys(normalizeStructuredData(document.structuredData)).length > 0,
+    );
+    if (!documents.length) {
+      return res.status(400).json({ error: 'Excel file does not contain completed MOS or JSA form values' });
+    }
+
+    return res.json({ templateVersion: MOS_JSA_TEMPLATE_VERSION, documents });
+  } catch (error) {
+    return res.status(400).json({ error: 'Unable to read MOS/JSA Excel template' });
   }
 });
 
@@ -3605,7 +4490,7 @@ app.get('/api/permits/:id', authenticate, async (req, res) => {
   }
 
   return res.json({
-    ...permit,
+    ...(await withPermitRevisionState(permit)),
     auditLogs: await getAuditLogs(permit.id),
   });
 });
@@ -3761,7 +4646,7 @@ app.post('/api/permits/:id/hse-review', authenticate, async (req, res) => {
 
   if (applyDecision) {
     const allowedStatuses =
-      evaluation.evaluation_stage === 'Stage 2' ? ['stage1_complete', 'approved'] : ['submitted'];
+      evaluation.evaluation_stage === 'Permit Approval' ? ['stage1_complete', 'approved'] : ['submitted'];
 
     if (!allowedStatuses.includes(permit.status)) {
       return res.status(409).json({
@@ -3821,7 +4706,7 @@ app.patch('/api/permits/:id/status', authenticate, async (req, res) => {
     });
   }
 
-  const decision = getTransitionDecision(req.user, permit, status);
+  const decision = await getTransitionDecision(req.user, permit, status);
 
   if (!decision.allowed) {
     return res.status(decision.httpStatus).json(decision);

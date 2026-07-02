@@ -14,6 +14,8 @@ document.addEventListener('DOMContentLoaded', () => {
     addressSummary: document.querySelector('#addressSummary'),
     addressSummaryLine1: document.querySelector('#addressSummaryLine1'),
     addressSummaryLine2: document.querySelector('#addressSummaryLine2'),
+    rolePanel: document.querySelector('#rolePanel'),
+    roleList: document.querySelector('#roleList'),
     passwordForm: document.querySelector('#passwordForm'),
     toast: document.querySelector('#toast'),
   };
@@ -26,6 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
     safety_officer: '/safety',
     worker: '/worker',
   };
+  const rolePriority = ['admin', 'safety_officer', 'supervisor', 'requester', 'worker'];
 
   let session = readSession();
   let toastTimer;
@@ -58,6 +61,26 @@ document.addEventListener('DOMContentLoaded', () => {
       .split('_')
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
       .join(' ');
+  }
+
+  function getUserRoles(user) {
+    const roles = Array.isArray(user?.roles) ? user.roles : [user?.role];
+    return roles
+      .map((role) => String(role || '').toLowerCase())
+      .map((role) => role === 'approver' ? 'supervisor' : role)
+      .filter(Boolean)
+      .filter((role, index, list) => list.indexOf(role) === index)
+      .sort((a, b) => {
+        const aIndex = rolePriority.indexOf(a);
+        const bIndex = rolePriority.indexOf(b);
+        return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
+      });
+  }
+
+  function getPreferredRole(user) {
+    const roles = getUserRoles(user);
+    return ['admin', 'safety_officer', 'supervisor', 'requester', 'worker']
+      .find((role) => roles.includes(role)) || user?.role;
   }
 
   function initials(name) {
@@ -115,11 +138,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderUser(user) {
     const resolvedUser = user || session?.user || {};
-    const home = roleHome[resolvedUser.role] || '/dashboard';
+    const roles = getUserRoles(resolvedUser);
+    const home = roleHome[getPreferredRole(resolvedUser)] || '/dashboard';
     const name = resolvedUser.fullName || resolvedUser.email || 'User';
     elements.backLink.href = home;
     elements.profileName.textContent = name;
-    elements.profileMeta.textContent = `${roleLabel(resolvedUser.role)} - ${resolvedUser.employeeId || resolvedUser.email || 'PTW user'}`;
+    elements.profileMeta.textContent = `${roles.map(roleLabel).join(', ') || roleLabel(resolvedUser.role)} - ${resolvedUser.employeeId || resolvedUser.email || 'PTW user'}`;
 
     if (resolvedUser.profilePictureUrl) {
       elements.profilePicture.innerHTML = `<img src="${resolvedUser.profilePictureUrl}" alt="">`;
@@ -135,6 +159,35 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.addressForm.postalCode.value = address.postalCode || '';
     elements.addressForm.country.value = address.country || '';
     renderAddressSummary(address);
+    renderRoles(resolvedUser);
+  }
+
+  function activeRoleFor(user) {
+    const roles = getUserRoles(user);
+    const activeRole = String(session?.activeRole || '').toLowerCase();
+    return roles.includes(activeRole) ? activeRole : getPreferredRole(user);
+  }
+
+  function renderRoles(user) {
+    const roles = getUserRoles(user);
+    const activeRole = activeRoleFor(user);
+    elements.rolePanel.classList.toggle('single-role', roles.length <= 1);
+    elements.roleList.innerHTML = roles.map((role) => `
+      <button class="role-card ${role === activeRole ? 'is-active' : ''}" type="button" data-switch-role="${role}">
+        <span>
+          <strong>${roleLabel(role)}</strong>
+          <small>${role === activeRole ? 'Current session' : 'Open dashboard'}</small>
+        </span>
+        <em>${role === activeRole ? 'Active' : 'Switch'}</em>
+      </button>
+    `).join('');
+  }
+
+  function switchRole(role) {
+    const roles = getUserRoles(session?.user);
+    if (!roles.includes(role)) return;
+    writeSession({ ...session, activeRole: role });
+    window.location.assign(roleHome[role] || '/dashboard');
   }
 
   function renderAddressSummary(address = {}) {
@@ -265,6 +318,11 @@ document.addEventListener('DOMContentLoaded', () => {
       changePassword(event).catch((error) => showToast(error.error || 'Could not change password.', 'error'));
     });
     elements.logoutButton.addEventListener('click', logout);
+    elements.roleList.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-switch-role]');
+      if (!button) return;
+      switchRole(button.dataset.switchRole);
+    });
 
     try {
       await refreshUser();

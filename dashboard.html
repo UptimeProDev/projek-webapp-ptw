@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Requester Dashboard | PTW Guardian</title>
+  <title>Requester Dashboard | PTW Guardian</title>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg: #f4f6f8;
@@ -39,7 +40,7 @@
       margin: 0;
       background: var(--bg);
       color: var(--ink);
-      font-family: Arial, Helvetica, sans-serif;
+      font-family: Roboto, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
     }
 
     button,
@@ -80,40 +81,17 @@
     }
 
     .brand {
-      display: grid;
-      grid-template-columns: 46px 1fr;
+      display: flex;
       align-items: center;
-      gap: 12px;
       min-width: 0;
     }
 
-    .brand-mark {
-      width: 46px;
-      height: 46px;
-      display: grid;
-      place-items: center;
+    .brand-logo {
+      width: 190px;
+      max-width: 100%;
+      height: 72px;
+      object-fit: contain;
       border-radius: 8px;
-      background: #f6c744;
-      color: #101820;
-      font-size: 13px;
-      font-weight: 900;
-      letter-spacing: 0.04em;
-    }
-
-    .brand h1 {
-      margin: 0;
-      font-size: 20px;
-      line-height: 1.1;
-      font-weight: 850;
-    }
-
-    .brand p {
-      margin: 4px 0 0;
-      color: #b9c5d0;
-      font-size: 12px;
-      font-weight: 800;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
     }
 
     .side-nav,
@@ -549,6 +527,7 @@
     }
 
     .panel {
+      min-width: 0;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--surface);
@@ -601,13 +580,46 @@
     }
 
     .table-wrap {
+      width: 100%;
+      max-width: 100%;
       overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
     }
 
     table {
       width: 100%;
       min-width: 760px;
       border-collapse: collapse;
+    }
+
+    .worker-table {
+      min-width: 1180px;
+      table-layout: fixed;
+    }
+
+    .worker-table th:nth-child(1),
+    .worker-table td:nth-child(1) {
+      width: 18%;
+    }
+
+    .worker-table th:nth-child(2),
+    .worker-table td:nth-child(2) {
+      width: 27%;
+    }
+
+    .worker-table th:nth-child(3),
+    .worker-table td:nth-child(3) {
+      width: 32%;
+    }
+
+    .worker-table th:nth-child(4),
+    .worker-table td:nth-child(4) {
+      width: 10%;
+    }
+
+    .worker-table th:nth-child(5),
+    .worker-table td:nth-child(5) {
+      width: 13%;
     }
 
     th,
@@ -815,6 +827,10 @@
       min-width: 0;
     }
 
+    .worker-name-line > div {
+      min-width: 0;
+    }
+
     .worker-avatar {
       width: 42px;
       height: 42px;
@@ -829,10 +845,12 @@
     }
 
     .worker-name {
+      display: block;
       color: #17212b;
       font-size: 15px;
       font-weight: 950;
-      line-height: 1.2;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
     }
 
     .worker-subline {
@@ -841,6 +859,7 @@
       font-size: 12px;
       font-weight: 750;
       line-height: 1.35;
+      overflow-wrap: anywhere;
     }
 
     .worker-meta-grid {
@@ -867,14 +886,17 @@
       display: block;
       color: #17212b;
       font-weight: 950;
-      line-height: 1.25;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
     }
 
     .worker-company {
-      margin-top: 4px;
+      margin-top: 6px;
       color: var(--muted);
       font-size: 12px;
       font-weight: 800;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
     }
 
     .worker-cert-list {
@@ -883,14 +905,19 @@
     }
 
     .worker-cert-card {
+      min-width: 0;
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
       gap: 8px;
-      align-items: center;
+      align-items: start;
       padding: 8px 9px;
       border: 1px solid #ead8ad;
       border-radius: 8px;
       background: #fff7e6;
+    }
+
+    .worker-cert-card > div {
+      min-width: 0;
     }
 
     .worker-cert-title {
@@ -898,7 +925,8 @@
       color: #7b4a00;
       font-size: 12px;
       font-weight: 950;
-      line-height: 1.25;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
     }
 
     .worker-cert-file {
@@ -907,7 +935,7 @@
       color: #8a5b0a;
       font-size: 12px;
       font-weight: 750;
-      line-height: 1.25;
+      line-height: 1.35;
       overflow-wrap: anywhere;
     }
 
@@ -997,7 +1025,7 @@
       position: fixed;
       right: 30px;
       bottom: 100px;
-      z-index: 30;
+      z-index: 80;
       max-width: 340px;
       padding: 13px 16px;
       border: 1px solid var(--line);
@@ -1018,13 +1046,31 @@
       transform: translateY(0);
     }
 
+    .toast.in-dialog {
+      position: sticky;
+      right: auto;
+      bottom: 76px;
+      width: 100%;
+      max-width: none;
+      margin: 14px 0 0;
+      z-index: 5;
+      border-color: #c9d3dc;
+      transform: translateY(6px);
+    }
+
+    .toast.in-dialog.is-visible {
+      transform: translateY(0);
+    }
+
     .app-dialog {
       width: min(820px, calc(100% - 32px));
+      max-height: calc(100dvh - 32px);
       padding: 0;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--surface);
       box-shadow: 0 28px 80px rgba(16, 24, 32, 0.24);
+      overflow: hidden;
     }
 
     .app-dialog.compact {
@@ -1047,6 +1093,9 @@
 
     .dialog-shell {
       padding: 24px;
+      max-height: calc(100dvh - 34px);
+      overflow-y: auto;
+      overscroll-behavior: contain;
     }
 
     .app-dialog.compact .dialog-shell {
@@ -1197,10 +1246,168 @@
       accent-color: #17212b;
     }
 
+    .ppe-checklist {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .ppe-group {
+      min-width: 0;
+      padding: 12px;
+      display: grid;
+      align-content: start;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .ppe-group-title {
+      color: #2e3842;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .ppe-group label {
+      min-height: 34px;
+      padding: 7px 9px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      background: #f8fafc;
+      color: #29343e;
+      font-size: 13px;
+      font-weight: 800;
+      line-height: 1.25;
+    }
+
+    .form-field .ppe-group input[type="checkbox"] {
+      width: 14px;
+      min-height: 0;
+      height: 14px;
+      flex: 0 0 auto;
+      margin: 0;
+      padding: 0;
+      accent-color: #17212b;
+    }
+
     .document-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 12px;
+    }
+
+    .digital-document-panel {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      margin-bottom: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .digital-document-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .digital-document-actions input {
+      min-height: auto;
+      max-width: 320px;
+      padding: 8px;
+      background: #f8fafc;
+    }
+
+    .digital-document-status {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .digital-document-status span {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      background: #f8fafc;
+    }
+
+    .digital-document-status strong {
+      color: var(--text);
+      letter-spacing: 0;
+    }
+
+    .digital-document-status .is-ready {
+      color: #166534;
+      border-color: #bbf7d0;
+      background: #f0fdf4;
+    }
+
+    .digital-document-editor {
+      display: grid;
+      gap: 12px;
+    }
+
+    .digital-document-form {
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+    }
+
+    .digital-document-form h4 {
+      margin: 0 0 10px;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 950;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .digital-document-fields {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .digital-document-field {
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+    }
+
+    .digital-document-field.is-wide {
+      grid-column: 1 / -1;
+    }
+
+    .digital-document-field span {
+      color: #2f3a45;
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .digital-document-field small {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1.35;
+    }
+
+    .digital-document-field textarea {
+      min-height: 78px;
     }
 
     .document-upload {
@@ -1435,11 +1642,17 @@
     }
 
     .dialog-actions {
-      margin-top: 22px;
+      position: sticky;
+      bottom: -24px;
+      z-index: 4;
+      margin: 22px -24px -24px;
+      padding: 14px 24px;
       display: flex;
       justify-content: flex-end;
       gap: 10px;
       flex-wrap: wrap;
+      border-top: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), #ffffff 34%);
     }
 
     .dialog-button {
@@ -1614,6 +1827,94 @@
       overflow-wrap: anywhere;
     }
 
+    .detail-digital-evidence {
+      display: grid;
+      gap: 12px;
+    }
+
+    .detail-digital-evidence-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .detail-digital-evidence-head span {
+      color: #35516b;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .detail-export-button {
+      min-height: 34px;
+      padding: 7px 10px;
+      border: 1px solid #d7e2ec;
+      border-radius: 6px;
+      background: #ffffff;
+      color: #17212b;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+
+    .detail-export-button:hover {
+      border-color: #17212b;
+    }
+
+    .detail-digital-evidence-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .detail-digital-card {
+      min-width: 0;
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+      border: 1px solid #d7e2ec;
+      border-radius: 8px;
+      background: #f8fafc;
+    }
+
+    .detail-digital-card strong {
+      color: #17212b;
+      font-size: 13px;
+      font-weight: 950;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .detail-digital-card dl {
+      margin: 0;
+      display: grid;
+      gap: 9px;
+    }
+
+    .detail-digital-card dl div {
+      display: grid;
+      gap: 3px;
+    }
+
+    .detail-digital-card dt {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .detail-digital-card dd {
+      margin: 0;
+      color: #17212b;
+      font-size: 13px;
+      font-weight: 750;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
     .audit-list {
       display: grid;
       gap: 8px;
@@ -1722,6 +2023,8 @@
 
       .form-grid,
       .detail-grid,
+      .detail-digital-evidence-grid,
+      .ppe-checklist,
       .worker-options,
       .certification-row {
         grid-template-columns: 1fr;
@@ -1749,6 +2052,9 @@
 
       .dialog-actions {
         display: grid;
+        bottom: -18px;
+        margin: 18px -18px -18px;
+        padding: 12px 18px calc(12px + env(safe-area-inset-bottom));
       }
 
       .field-toolbar {
@@ -1773,6 +2079,30 @@
         width: 100%;
         justify-content: center;
       }
+
+      .app-dialog {
+        width: calc(100% - 18px);
+        max-height: calc(100dvh - 18px);
+      }
+
+      .dialog-shell {
+        max-height: calc(100dvh - 20px);
+        padding: 18px;
+      }
+
+      .toast {
+        left: 16px;
+        right: 16px;
+        bottom: calc(16px + env(safe-area-inset-bottom));
+        max-width: none;
+      }
+
+      .toast.in-dialog {
+        left: auto;
+        right: auto;
+        bottom: calc(74px + env(safe-area-inset-bottom));
+        margin-top: 12px;
+      }
     }
   </style>
 </head>
@@ -1780,11 +2110,7 @@
   <div class="app-shell">
     <aside class="sidebar" aria-label="Requester navigation">
       <div class="brand">
-        <div class="brand-mark">PTW</div>
-        <div>
-          <h1>PTW Guardian</h1>
-          <p>Safety Ops</p>
-        </div>
+        <img class="brand-logo" src="/assets/ptw-guardian-login-v2.png" alt="PTW Guardian" />
       </div>
 
       <nav class="side-nav">
@@ -2092,12 +2418,11 @@
         <label class="form-field">
           <span>Work Type</span>
           <select name="workType" required>
-            <option value="Hot Work">Hot Work</option>
-            <option value="Confined Space">Confined Space</option>
-            <option value="Electrical Isolation">Electrical Isolation</option>
-            <option value="Work at Height">Work at Height</option>
-            <option value="Line Breaking">Line Breaking</option>
-            <option value="General Maintenance">General Maintenance</option>
+            <option value="Preventive Maintenance">Preventive Maintenance</option>
+            <option value="Corrective Maintenance">Corrective Maintenance</option>
+            <option value="Housekeeping">Housekeeping</option>
+            <option value="Predictive Maintenance">Predictive Maintenance</option>
+            <option value="Project">Project</option>
           </select>
         </label>
 
@@ -2122,12 +2447,13 @@
         </label>
 
         <div class="form-field full">
-          <span class="field-label">Hazards</span>
+          <span class="field-label">Permit Type</span>
           <div class="hazard-options">
             <label><input name="hazards" type="checkbox" value="Hot Work" /> Hot Work</label>
             <label><input name="hazards" type="checkbox" value="Confined Space" /> Confined Space</label>
-            <label><input name="hazards" type="checkbox" value="Working at Height" /> Working at Height</label>
-            <label><input name="hazards" type="checkbox" value="Electrical" /> Electrical</label>
+            <label><input name="hazards" type="checkbox" value="Electrical Isolation" /> Electrical Isolation</label>
+            <label><input name="hazards" type="checkbox" value="Work at Height" /> Work at Height</label>
+            <label><input name="hazards" type="checkbox" value="Line Breaking" /> Line Breaking</label>
             <label><input name="hazards" type="checkbox" value="Chemical Handling" /> Chemical Handling</label>
             <label data-emergency-hazard-option hidden><input name="hazards" type="checkbox" value="Emergency" /> Emergency</label>
           </div>
@@ -2135,6 +2461,14 @@
 
         <div class="form-field full">
           <span class="field-label">Required Documents</span>
+          <div class="digital-document-panel">
+            <div class="digital-document-actions">
+              <button class="dialog-button" type="button" id="downloadMosJsaTemplateButton">Download MOS/JSA Excel Template</button>
+              <input id="importMosJsaTemplateInput" type="file" accept=".xlsx" />
+            </div>
+            <div class="digital-document-status" id="digitalDocumentStatus" aria-live="polite"></div>
+            <div class="digital-document-editor" id="digitalDocumentEditor"></div>
+          </div>
           <div class="document-grid" id="documentGrid"></div>
         </div>
 
@@ -2150,18 +2484,65 @@
           <textarea name="controls" placeholder="One control per line, e.g. Fire watch assigned"></textarea>
         </label>
 
-        <label class="form-field">
-          <span>PPE</span>
-          <input name="ppe" type="text" placeholder="Gloves, face shield, harness" />
-        </label>
+        <div class="form-field full">
+          <span class="field-label">PPE</span>
+          <div class="ppe-checklist" aria-label="Common PPE checklist">
+            <div class="ppe-group">
+              <div class="ppe-group-title">Head</div>
+              <label><input name="ppe" type="checkbox" value="Hard hat" /> Hard hat</label>
+              <label><input name="ppe" type="checkbox" value="Bump cap" /> Bump cap</label>
+            </div>
+            <div class="ppe-group">
+              <div class="ppe-group-title">Eyes</div>
+              <label><input name="ppe" type="checkbox" value="Safety glasses" /> Safety glasses</label>
+              <label><input name="ppe" type="checkbox" value="Goggles" /> Goggles</label>
+              <label><input name="ppe" type="checkbox" value="Face shield" /> Face shield</label>
+            </div>
+            <div class="ppe-group">
+              <div class="ppe-group-title">Hearing</div>
+              <label><input name="ppe" type="checkbox" value="Earplugs" /> Earplugs</label>
+              <label><input name="ppe" type="checkbox" value="Earmuffs" /> Earmuffs</label>
+            </div>
+            <div class="ppe-group">
+              <div class="ppe-group-title">Respiratory</div>
+              <label><input name="ppe" type="checkbox" value="Dust mask" /> Dust mask</label>
+              <label><input name="ppe" type="checkbox" value="N95/KN95" /> N95/KN95</label>
+              <label><input name="ppe" type="checkbox" value="Respirator" /> Respirator</label>
+            </div>
+            <div class="ppe-group">
+              <div class="ppe-group-title">Hands</div>
+              <label><input name="ppe" type="checkbox" value="Cut-resistant gloves" /> Cut-resistant gloves</label>
+              <label><input name="ppe" type="checkbox" value="Chemical-resistant gloves" /> Chemical-resistant gloves</label>
+              <label><input name="ppe" type="checkbox" value="Insulated gloves" /> Insulated gloves</label>
+            </div>
+            <div class="ppe-group">
+              <div class="ppe-group-title">Body</div>
+              <label><input name="ppe" type="checkbox" value="Hi-vis vest" /> Hi-vis vest</label>
+              <label><input name="ppe" type="checkbox" value="Coveralls" /> Coveralls</label>
+              <label><input name="ppe" type="checkbox" value="Apron" /> Apron</label>
+              <label><input name="ppe" type="checkbox" value="Lab coat" /> Lab coat</label>
+            </div>
+            <div class="ppe-group">
+              <div class="ppe-group-title">Feet</div>
+              <label><input name="ppe" type="checkbox" value="Safety boots" /> Safety boots</label>
+              <label><input name="ppe" type="checkbox" value="Steel-toe shoes" /> Steel-toe shoes</label>
+              <label><input name="ppe" type="checkbox" value="Slip-resistant shoes" /> Slip-resistant shoes</label>
+            </div>
+            <div class="ppe-group">
+              <div class="ppe-group-title">Fall protection</div>
+              <label><input name="ppe" type="checkbox" value="Safety harness" /> Safety harness</label>
+              <label><input name="ppe" type="checkbox" value="Lanyard" /> Lanyard</label>
+              <label><input name="ppe" type="checkbox" value="Lifeline" /> Lifeline</label>
+            </div>
+            <div class="ppe-group">
+              <div class="ppe-group-title">Skin / chemical protection</div>
+              <label><input name="ppe" type="checkbox" value="Chemical suit" /> Chemical suit</label>
+              <label><input name="ppe" type="checkbox" value="Splash apron" /> Splash apron</label>
+              <label><input name="ppe" type="checkbox" value="Disposable sleeves" /> Disposable sleeves</label>
+            </div>
+          </div>
+        </div>
 
-        <label class="form-field">
-          <span>Approvers</span>
-          <select name="approvers" required>
-            <option value="">Select supervisor</option>
-            <option value="Sam Supervisor">Sam Supervisor</option>
-          </select>
-        </label>
       </div>
 
       <div class="dialog-actions">
@@ -2262,6 +2643,7 @@
     </form>
   </dialog>
 
-  <script src="/requester-dashboard.js?v=15"></script>
+  <script src="/role-switcher.js?v=3"></script>
+  <script src="/requester-dashboard.js?v=31"></script>
 </body>
 </html>

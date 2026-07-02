@@ -9,7 +9,7 @@
   --blue: #0b6fb3;
   --danger: #b42318;
   --shadow: 0 14px 34px rgba(16, 24, 32, 0.08);
-  font-family: Inter, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  font-family: Roboto, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
 }
 
 * {

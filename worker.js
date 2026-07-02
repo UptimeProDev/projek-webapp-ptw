@@ -329,7 +329,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function getPermitType(permit) {
     if (permit.workType) return permit.workType;
     const match = String(permit.description || '').match(/Permit Type:\s*([^\n]+)/i);
-    return match ? match[1].trim() : 'General Maintenance';
+    return match ? match[1].trim() : 'Preventive Maintenance';
   }
 
   function extractScope(description) {

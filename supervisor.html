@@ -4,17 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Supervisor Command Center | PTW Guardian</title>
-  <link rel="stylesheet" href="/supervisor.css?v=9" />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/supervisor.css?v=17" />
 </head>
 <body>
   <div class="command-shell">
     <aside class="sidebar" aria-label="Supervisor navigation">
       <div class="brand">
-        <div class="brand-mark">SUP</div>
-        <div>
-          <h1>PTW Guardian</h1>
-          <p>Supervisor Portal</p>
-        </div>
+        <img class="brand-logo" src="/assets/ptw-guardian-login-v2.png" alt="PTW Guardian" />
       </div>
 
       <nav class="nav-list">
@@ -258,14 +255,14 @@
             <span>Back to Dashboard</span>
           </button>
           <div class="review-user">
-            <button class="icon-button" type="button" aria-label="Notifications">
+            <button class="icon-button" type="button" id="reviewNotificationButton" aria-label="Notifications">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a2.4 2.4 0 0 0 2.3-1.8H9.7A2.4 2.4 0 0 0 12 22ZM5 17h14l-1.7-2.3V10a5.3 5.3 0 0 0-4.2-5.2V3a1.1 1.1 0 0 0-2.2 0v1.8A5.3 5.3 0 0 0 6.7 10v4.7L5 17Zm3.7-2.7V10a3.3 3.3 0 0 1 6.6 0v4.3l.5.7H8.2l.5-.7Z"/></svg>
             </button>
             <div>
-              <strong>Safety Officer</strong>
-              <span>Admin Reviewer</span>
+              <strong id="reviewProfileName">Supervisor</strong>
+              <span id="reviewProfileRole">Supervisor</span>
             </div>
-            <span class="avatar-badge">SO</span>
+            <button class="avatar-badge" type="button" id="reviewProfileAvatar" aria-label="Open account settings">S</button>
           </div>
         </div>
         <div id="permitReviewContent"></div>
@@ -280,6 +277,14 @@
     <div class="extension-dialog-content" id="extensionDialogContent"></div>
   </dialog>
 
-  <script src="/supervisor.js?v=9"></script>
+  <dialog class="site-checklist-dialog" id="siteChecklistDialog">
+    <form method="dialog">
+      <button class="dialog-close" value="cancel" aria-label="Close site validation checklist">x</button>
+    </form>
+    <div class="site-checklist-dialog-content" id="siteChecklistDialogContent"></div>
+  </dialog>
+
+  <script src="/role-switcher.js?v=3"></script>
+  <script src="/supervisor.js?v=23"></script>
 </body>
 </html>

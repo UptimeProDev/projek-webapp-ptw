@@ -1,6 +1,5 @@
 const COMMON_STAGE_1_DOCUMENTS = [
   { key: 'MOS', label: 'Method Statement / MOS' },
-  { key: 'HIRARC', label: 'HIRARC' },
   { key: 'JSA', label: 'JSA' },
   { key: 'ERP', label: 'Emergency Response Plan' },
 ];
@@ -76,6 +75,36 @@ const PERMIT_TYPE_RULES = {
     stage2: ['lotoVerified', 'chemicalControlsVerified'],
   },
   'General Maintenance': {
+    documents: [],
+    competencies: [{ key: 'SAFETY_INDUCTION', label: 'Safety induction' }],
+    controls: ['barricade', 'ppe', 'toolbox'],
+    stage2: ['barricadingVerified'],
+  },
+  'Preventive Maintenance': {
+    documents: [],
+    competencies: [{ key: 'SAFETY_INDUCTION', label: 'Safety induction' }],
+    controls: ['barricade', 'ppe', 'toolbox'],
+    stage2: ['barricadingVerified'],
+  },
+  'Corrective Maintenance': {
+    documents: [],
+    competencies: [{ key: 'SAFETY_INDUCTION', label: 'Safety induction' }],
+    controls: ['barricade', 'ppe', 'toolbox'],
+    stage2: ['barricadingVerified'],
+  },
+  Housekeeping: {
+    documents: [],
+    competencies: [{ key: 'SAFETY_INDUCTION', label: 'Safety induction' }],
+    controls: ['barricade', 'ppe', 'toolbox'],
+    stage2: ['barricadingVerified'],
+  },
+  'Predictive Maintenance': {
+    documents: [],
+    competencies: [{ key: 'SAFETY_INDUCTION', label: 'Safety induction' }],
+    controls: ['barricade', 'ppe', 'toolbox'],
+    stage2: ['barricadingVerified'],
+  },
+  Project: {
     documents: [],
     competencies: [{ key: 'SAFETY_INDUCTION', label: 'Safety induction' }],
     controls: ['barricade', 'ppe', 'toolbox'],
@@ -192,6 +221,12 @@ function normalizePermitDocuments(documents, description = '') {
             attachmentData: document?.attachmentData || document?.fileData || document?.contentBase64,
             attachmentPath: document?.attachmentPath,
             hasAttachment: Boolean(document?.hasAttachment || document?.attachmentData || document?.attachmentPath),
+            source: document?.source,
+            templateVersion: document?.templateVersion,
+            structuredData:
+              document?.structuredData && typeof document.structuredData === 'object' && !Array.isArray(document.structuredData)
+                ? document.structuredData
+                : null,
           };
     const name = normalizeString(source.name);
     const type = canonicalDocumentType(source.type, name);
@@ -213,6 +248,9 @@ function normalizePermitDocuments(documents, description = '') {
           ? { attachmentPath: normalizeString(source.attachmentPath), hasAttachment: true }
           : {}),
         ...(source.hasAttachment ? { hasAttachment: true } : {}),
+        ...(normalizeString(source.source) ? { source: normalizeString(source.source) } : {}),
+        ...(normalizeString(source.templateVersion) ? { templateVersion: normalizeString(source.templateVersion) } : {}),
+        ...(source.structuredData ? { structuredData: source.structuredData } : {}),
       });
     }
   });
@@ -241,6 +279,15 @@ function extractPermitType(permit) {
     .join(' ')
     .toLowerCase();
 
+  if (source.includes('corrective') || source.includes('repair') || source.includes('breakdown')) {
+    return 'Corrective Maintenance';
+  }
+  if (source.includes('housekeeping') || source.includes('cleaning')) return 'Housekeeping';
+  if (source.includes('predictive') || source.includes('condition monitoring')) {
+    return 'Predictive Maintenance';
+  }
+  if (source.includes('project') || source.includes('tie-in')) return 'Project';
+  if (source.includes('preventive') || source.includes('inspection')) return 'Preventive Maintenance';
   if (source.includes('hot') || source.includes('weld')) return 'Hot Work';
   if (source.includes('confined') || source.includes('vessel') || source.includes('tank')) {
     return 'Confined Space';
@@ -257,12 +304,17 @@ function extractPermitType(permit) {
   if (source.includes('excavat') || source.includes('trench')) return 'Excavation';
   if (source.includes('line break')) return 'Line Breaking';
   if (source.includes('chemical') || source.includes('sds')) return 'Chemical';
-  return 'General Maintenance';
+  return 'Preventive Maintenance';
 }
 
 function canonicalPermitType(value) {
   const normalized = normalizeString(value).toLowerCase();
 
+  if (normalized.includes('preventive')) return 'Preventive Maintenance';
+  if (normalized.includes('corrective')) return 'Corrective Maintenance';
+  if (normalized.includes('housekeeping')) return 'Housekeeping';
+  if (normalized.includes('predictive')) return 'Predictive Maintenance';
+  if (normalized.includes('project')) return 'Project';
   if (normalized.includes('hot')) return 'Hot Work';
   if (normalized.includes('confined')) return 'Confined Space';
   if (normalized.includes('electrical') || normalized.includes('isolation')) {
@@ -273,7 +325,7 @@ function canonicalPermitType(value) {
   if (normalized.includes('excavat')) return 'Excavation';
   if (normalized.includes('line break')) return 'Line Breaking';
   if (normalized.includes('chemical')) return 'Chemical';
-  return value in PERMIT_TYPE_RULES ? value : 'General Maintenance';
+  return value in PERMIT_TYPE_RULES ? value : 'Preventive Maintenance';
 }
 
 function hasDocument(documents, requirementKey) {
@@ -395,7 +447,7 @@ function evaluateStage1(permit, workers, now) {
   });
 
   if (!hazards.length) {
-    flags.push('HIRARC/JSA hazard register is missing; no hazards are recorded against the permit.');
+    flags.push('Permit type register is missing; no permit type entries are recorded against the permit.');
   }
 
   if (!controls.length) {
@@ -453,7 +505,7 @@ function evaluateStage1(permit, workers, now) {
       : 'Approved';
 
   return createEvaluation({
-    stage: permit.isEmergency ? 'Emergency' : 'Stage 1',
+    stage: permit.isEmergency ? 'Emergency' : 'MOS Approval',
     decision,
     flags,
     permitType,
@@ -528,7 +580,7 @@ function evaluateStage2(permit, workers, activePermits, siteValidation = {}) {
       : 'Approved';
 
   return createEvaluation({
-    stage: permit.isEmergency ? 'Emergency' : 'Stage 2',
+    stage: permit.isEmergency ? 'Emergency' : 'Permit Approval',
     decision,
     flags,
     permitType,
@@ -608,7 +660,7 @@ function createEvaluation({ stage, decision, flags, permitType }) {
 
 function buildFeedback(stage, decision, flags, permitType) {
   if (decision === 'Approved') {
-    if (stage === 'Stage 1') {
+    if (stage === 'MOS Approval') {
       return `MOS Approved for ${permitType}. Required methodology, hazard controls, document evidence, and competency checks are recorded sufficiently for routing to work scheduling.`;
     }
 
@@ -624,7 +676,7 @@ function buildFeedback(stage, decision, flags, permitType) {
 
 function getNextWorkflowStep(stage, decision) {
   if (decision === 'Approved') {
-    if (stage === 'Stage 1') {
+    if (stage === 'MOS Approval') {
       return 'Work Scheduling';
     }
 
@@ -635,19 +687,30 @@ function getNextWorkflowStep(stage, decision) {
     return 'Rejected/Stop Work';
   }
 
-  return stage === 'Stage 2' ? 'Submitted/Draft' : 'Return/Draft';
+  return stage === 'Permit Approval' ? 'Submitted/Draft' : 'Return/Draft';
+}
+
+function canonicalEvaluationStage(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  if (!normalized) return '';
+  if (normalized === 'stage 1' || normalized.includes('mos')) return 'MOS Approval';
+  if (normalized === 'stage 2' || normalized.includes('permit approval') || normalized.includes('execution')) {
+    return 'Permit Approval';
+  }
+  if (normalized.includes('emergency')) return 'Emergency';
+  return value;
 }
 
 function buildHseEvaluation({ permit, workers = [], activePermits = [], evaluationStage, siteValidation }) {
-  const requestedStage = normalizeString(evaluationStage);
+  const requestedStage = canonicalEvaluationStage(evaluationStage);
   const inferredStage = permit.isEmergency
     ? 'Emergency'
     : permit.status === 'stage1_complete' || permit.status === 'approved'
-      ? 'Stage 2'
-      : 'Stage 1';
+      ? 'Permit Approval'
+      : 'MOS Approval';
   const stage = requestedStage || inferredStage;
 
-  if (stage === 'Stage 2') {
+  if (stage === 'Permit Approval') {
     return evaluateStage2(permit, workers, activePermits, siteValidation);
   }
 
@@ -680,7 +743,7 @@ function buildHseEvaluation({ permit, workers = [], activePermits = [], evaluati
 
 function mapHseDecisionToStatus(evaluation) {
   if (evaluation.decision === 'Approved') {
-    return evaluation.evaluation_stage === 'Stage 1' ? 'stage1_complete' : 'approved';
+    return evaluation.evaluation_stage === 'MOS Approval' ? 'stage1_complete' : 'approved';
   }
 
   return 'rejected';

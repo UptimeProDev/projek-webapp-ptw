@@ -34,7 +34,8 @@
   const statusLabels = {
     draft: "Draft",
     submitted: "Pending Approval",
-    stage1_complete: "Safety Stage 2",
+    resubmitted: "Resubmitted",
+    stage1_complete: "Permit Approval",
     pending: "Pending Approval",
     approved: "Active",
     active: "Active",
@@ -46,16 +47,16 @@
   const typeIcons = {
     "Emergency Permit":
       '<path d="m12 3 10 18H2L12 3Z" /><path d="M12 9v5M12 17h.01" />',
-    "Hot Work":
-      '<path d="M12 2s5 5 5 10a5 5 0 0 1-10 0c0-3 2-5 2-5s.5 2 2.5 3.5C12 7 12 2 12 2Z" />',
-    "Confined Space":
-      '<rect x="4" y="4" width="16" height="16" rx="2" /><path d="M8 8h8M8 12h8M8 16h8" />',
-    "Electrical Isolation": '<path d="m13 2-7 12h6l-1 8 7-12h-6Z" />',
-    "Work at Height":
-      '<path d="M4 21V9l8-6 8 6v12" /><path d="M9 21v-7h6v7" />',
-    "Line Breaking": '<path d="M3 12h6l3-7 3 14 3-7h3" />',
-    "General Maintenance":
+    "Preventive Maintenance":
       '<path d="M14.7 6.3a4 4 0 0 0-5.7 5.7L3 18v3h3l6-6a4 4 0 0 0 5.7-5.7l-2.8 2.8-2-2Z" />',
+    "Corrective Maintenance":
+      '<path d="M14.7 6.3a4 4 0 0 0-5.7 5.7L3 18v3h3l6-6a4 4 0 0 0 5.7-5.7l-2.8 2.8-2-2Z" />',
+    "Housekeeping":
+      '<path d="M3 21h18M7 21V9l5-6 5 6v12M9 13h6" />',
+    "Predictive Maintenance":
+      '<path d="M4 19V5M4 19h16M8 15l3-4 3 2 4-6" />',
+    "Project":
+      '<path d="M4 6h16M4 12h10M4 18h16" />',
   };
 
   const defaultWorkers = [
@@ -99,18 +100,9 @@
       name: "Mike Smith",
       role: "Maintenance Technician",
       status: "expired",
-      qualifications: ["Safety Induction", "General Maintenance"],
+      qualifications: ["Safety Induction", "Chemical Handling"],
     },
   ];
-
-  const workTypeQualificationMap = {
-    "Hot Work": ["Hot Work"],
-    "Confined Space": ["Confined Space"],
-    "Electrical Isolation": ["Electrical", "Electrical Isolation", "LOTO"],
-    "Work at Height": ["Work at Height", "Working at Height"],
-    "Line Breaking": ["Line Breaking", "Chemical Handling"],
-    "General Maintenance": ["Safety Induction", "General Maintenance"],
-  };
 
   const workerPermitTypes = [
     "Hot Work",
@@ -118,7 +110,7 @@
     "Electrical Isolation",
     "Work at Height",
     "Line Breaking",
-    "General Maintenance",
+    "Chemical Handling",
   ];
 
   const workerRoleOptions = [
@@ -172,8 +164,8 @@
       ["WAH", "Work at Height"],
       ["Line Breaking", "Line Breaking"],
       ["Line Break", "Line Breaking"],
-      ["General Maintenance", "General Maintenance"],
-      ["Maintenance", "General Maintenance"],
+      ["Chemical Handling", "Chemical Handling"],
+      ["Chemical", "Chemical Handling"],
     ].map(([alias, canonical]) => [qualificationKey(alias), canonical]),
   );
 
@@ -185,15 +177,43 @@
   };
 
   const approverOptions = {
-    normal: [{ value: "Sam Supervisor", label: "Sam Supervisor" }],
+    normal: [{ value: "PTW Admin", label: "PTW Admin" }],
     emergency: [{ value: "Sarah Safety", label: "Sarah Safety" }],
   };
 
-  const commonDocumentRequirements = [
-    { type: "MOS", label: "Method Statement / MOS", inputName: "mosDocument" },
-    { type: "HIRARC", label: "HIRARC / Risk Assessment", inputName: "hirarcDocument" },
-    { type: "JSA", label: "JSA / SWP", inputName: "jsaDocument" },
+  const digitalDocumentRequirements = [
+    { type: "MOS", label: "Method Statement / MOS" },
+    { type: "JSA", label: "JSA / SWP" },
   ];
+
+  const digitalDocumentSchemas = {
+    MOS: {
+      title: "MOS Digital Form",
+      fields: [
+        { key: "workTitle", label: "Work Title", input: "input", help: "Same title used in the permit request" },
+        { key: "workLocation", label: "Work Location", input: "input", help: "Plant, unit, area, or equipment location" },
+        { key: "scope", label: "Scope of Work", input: "textarea", help: "Work scope and boundary" },
+        { key: "methodSteps", label: "Method Steps", input: "textarea", help: "One method step per line, in sequence" },
+        { key: "toolsEquipment", label: "Tools / Equipment", input: "textarea", help: "Tools, machines, access equipment, test equipment" },
+        { key: "materials", label: "Materials / Chemicals", input: "textarea", help: "Consumables, chemicals, SDS reference if applicable" },
+        { key: "isolations", label: "Isolation / Preparation", input: "textarea", help: "LOTO, drains, barricades, depressurization, cleaning" },
+        { key: "responsiblePerson", label: "Responsible Person", input: "input", help: "Supervisor or competent person accountable for the work" },
+        { key: "emergencyArrangement", label: "Emergency Arrangement", input: "textarea", help: "Emergency contact, muster point, rescue or spill response" },
+      ],
+    },
+    JSA: {
+      title: "JSA Digital Form",
+      fields: [
+        { key: "taskStep", label: "Task Step / Activity", input: "textarea", help: "Task or activity being assessed" },
+        { key: "permitTypeHazards", label: "Permit Type / Hazard", input: "textarea", help: "Hot work, confined space, electrical, height, chemical, etc." },
+        { key: "potentialConsequence", label: "Potential Consequence", input: "textarea", help: "What could happen if the hazard is not controlled" },
+        { key: "controlMeasures", label: "Control Measures", input: "textarea", help: "Preventive and protective controls required before work" },
+        { key: "requiredPpe", label: "Required PPE", input: "textarea", help: "PPE required for the activity" },
+        { key: "responsiblePerson", label: "Responsible Person", input: "input", help: "Person responsible for the controls" },
+        { key: "residualRisk", label: "Residual Risk", input: "input", help: "Low, Medium, High, or local risk rating" },
+      ],
+    },
+  };
 
   const emergencyDocumentRequirements = [
     { type: "ERP", label: "Emergency Response Plan", inputName: "erpDocument" },
@@ -250,25 +270,28 @@
         inputName: "sdsDocument",
       },
     ],
-    "General Maintenance": [],
+    "Preventive Maintenance": [],
+    "Corrective Maintenance": [],
+    "Housekeeping": [],
+    "Predictive Maintenance": [],
+    "Project": [],
   };
 
   const samplePermits = [
     {
       id: "PTW-2026-1194",
-      title: "Pump skid welding support bracket",
-      workType: "Hot Work",
+      title: "Pump skid preventive inspection",
+      workType: "Preventive Maintenance",
       location: "Main Plant Alpha - Sector 4",
       status: "submitted",
-      description: "Permit Type: Hot Work\n\nWelding support brackets near pump skid.",
+      description: "Permit Type: Preventive Maintenance\n\nPreventive inspection near pump skid.",
       startDateTime: "2026-06-03T10:00",
       endDateTime: "2026-06-03T15:00",
-      hazards: ["Hot Work", "Working at Height"],
+      hazards: ["Mechanical", "Working at Height"],
       controls: ["Fire watch assigned", "Gas test before start"],
       ppe: ["Fire resistant coveralls", "Face shield"],
-      approvers: ["Sam Supervisor"],
+      approvers: ["PTW Admin"],
       documents: [
-        { type: "HIRARC", name: "pump-skid-hirarc.pdf" },
         { type: "JSA", name: "pump-skid-jsa.pdf" },
       ],
       assignedWorkers: ["W01"],
@@ -278,19 +301,18 @@
     },
     {
       id: "PTW-2026-1191",
-      title: "Vessel 12 internal inspection",
-      workType: "Confined Space",
+      title: "Vessel 12 corrective inspection",
+      workType: "Corrective Maintenance",
       location: "Tank Farm B - Vessel 12",
       status: "active",
-      description: "Permit Type: Confined Space\n\nInternal inspection before maintenance entry.",
+      description: "Permit Type: Corrective Maintenance\n\nInternal inspection before maintenance entry.",
       startDateTime: "2026-06-03T08:00",
       endDateTime: "2026-06-03T18:00",
       hazards: ["Confined Space"],
       controls: ["Standby person assigned", "Continuous gas monitoring"],
       ppe: ["Respirator", "Harness"],
-      approvers: ["Sam Supervisor"],
+      approvers: ["PTW Admin"],
       documents: [
-        { type: "HIRARC", name: "vessel-12-hirarc.pdf" },
         { type: "JSA", name: "vessel-12-entry-jsa.pdf" },
       ],
       assignedWorkers: ["W04"],
@@ -300,19 +322,18 @@
     },
     {
       id: "PTW-2026-1189",
-      title: "Substation panel isolation",
-      workType: "Electrical Isolation",
+      title: "Substation panel predictive check",
+      workType: "Predictive Maintenance",
       location: "Substation A - Panel 3",
       status: "draft",
-      description: "Permit Type: Electrical Isolation\n\nPrepare LOTO plan for panel isolation.",
+      description: "Permit Type: Predictive Maintenance\n\nPrepare condition monitoring check for panel isolation.",
       startDateTime: "2026-06-04T09:00",
       endDateTime: "2026-06-04T13:00",
       hazards: ["Electrical"],
       controls: ["LOTO register prepared"],
       ppe: ["Arc flash PPE"],
-      approvers: ["Sam Supervisor"],
+      approvers: ["PTW Admin"],
       documents: [
-        { type: "HIRARC", name: "substation-panel-hirarc.pdf" },
         { type: "JSA", name: "panel-isolation-jsa.pdf" },
       ],
       assignedWorkers: ["W02"],
@@ -322,20 +343,19 @@
     },
     {
       id: "PTW-2026-1184",
-      title: "Cooling water header line break",
-      workType: "Line Breaking",
+      title: "Cooling water header project tie-in",
+      workType: "Project",
       location: "Cooling Water Header",
       status: "rejected",
       description:
-        "Permit Type: Line Breaking\n\nRevise isolation boundary and attach updated JSA.",
+        "Permit Type: Project\n\nRevise isolation boundary and attach updated JSA.",
       startDateTime: "2026-06-04T08:00",
       endDateTime: "2026-06-04T12:00",
       hazards: ["Chemical Handling"],
       controls: ["Drain and depressurize line"],
       ppe: ["Chemical gloves", "Face shield"],
-      approvers: ["Sam Supervisor"],
+      approvers: ["PTW Admin"],
       documents: [
-        { type: "HIRARC", name: "cooling-water-hirarc.pdf" },
         { type: "JSA", name: "line-break-revised-jsa.pdf" },
       ],
       assignedWorkers: ["W05"],
@@ -358,9 +378,11 @@
     editingId: null,
     editingWorkerId: null,
     isEmergencyPermit: false,
+    structuredDocuments: [],
   };
 
   const elements = {
+    table: document.querySelector(".table-wrap table"),
     tableBody: document.querySelector("#permitTableBody"),
     tableHead: document.querySelector("#permitTableHead"),
     tableToolbar: document.querySelector(".table-toolbar"),
@@ -385,6 +407,10 @@
     workerCertificationList: document.querySelector("#workerCertificationList"),
     addWorkerCertificationButton: document.querySelector("#addWorkerCertificationButton"),
     documentGrid: document.querySelector("#documentGrid"),
+    digitalDocumentEditor: document.querySelector("#digitalDocumentEditor"),
+    downloadMosJsaTemplateButton: document.querySelector("#downloadMosJsaTemplateButton"),
+    importMosJsaTemplateInput: document.querySelector("#importMosJsaTemplateInput"),
+    digitalDocumentStatus: document.querySelector("#digitalDocumentStatus"),
     notificationButton: document.querySelector("#notificationButton"),
     notificationCloseButton: document.querySelector("#notificationCloseButton"),
     notificationPanel: document.querySelector("#notificationPanel"),
@@ -400,6 +426,7 @@
   };
 
   let toastTimer;
+  const toastHome = elements.toast?.parentElement || document.body;
 
   function readSession() {
     const stored =
@@ -520,11 +547,30 @@
   }
 
   function showToast(message) {
+    const openDialogShell = document.querySelector("dialog[open] .dialog-shell");
+
+    if (openDialogShell && elements.toast.parentElement !== openDialogShell) {
+      const actions = openDialogShell.querySelector(".dialog-actions");
+      elements.toast.classList.add("in-dialog");
+      if (actions) {
+        openDialogShell.insertBefore(elements.toast, actions);
+      } else {
+        openDialogShell.append(elements.toast);
+      }
+    } else if (!openDialogShell && elements.toast.parentElement !== toastHome) {
+      elements.toast.classList.remove("in-dialog");
+      toastHome.append(elements.toast);
+    }
+
     elements.toast.textContent = message;
     elements.toast.classList.add("is-visible");
     window.clearTimeout(toastTimer);
     toastTimer = window.setTimeout(() => {
       elements.toast.classList.remove("is-visible");
+      if (elements.toast.parentElement !== toastHome && !document.querySelector("dialog[open]")) {
+        elements.toast.classList.remove("in-dialog");
+        toastHome.append(elements.toast);
+      }
     }, 2800);
   }
 
@@ -712,14 +758,15 @@
       .join(" ")
       .toLowerCase();
 
-    if (source.includes("hot") || source.includes("weld")) return "Hot Work";
-    if (source.includes("confined") || source.includes("vessel")) return "Confined Space";
-    if (source.includes("electrical") || source.includes("substation")) {
-      return "Electrical Isolation";
+    if (source.includes("corrective") || source.includes("repair") || source.includes("breakdown")) {
+      return "Corrective Maintenance";
     }
-    if (source.includes("height") || source.includes("scaffold")) return "Work at Height";
-    if (source.includes("line break")) return "Line Breaking";
-    return "General Maintenance";
+    if (source.includes("housekeeping") || source.includes("cleaning")) return "Housekeeping";
+    if (source.includes("predictive") || source.includes("condition monitoring")) {
+      return "Predictive Maintenance";
+    }
+    if (source.includes("project") || source.includes("tie-in")) return "Project";
+    return "Preventive Maintenance";
   }
 
   function extractScope(description) {
@@ -731,7 +778,7 @@
       .filter((line) => !/^Assigned Workers:/i.test(line.trim()))
       .filter((line) => !/^Assigned Worker IDs:/i.test(line.trim()))
       .filter((line) => !/^Required Documents:/i.test(line.trim()))
-      .filter((line) => !/^(HIRARC|JSA):/i.test(line.trim()))
+      .filter((line) => !/^(HIRARC|MOS|JSA):/i.test(line.trim()))
       .join("\n")
       .trim();
   }
@@ -905,18 +952,38 @@
       );
   }
 
-  function isWorkerCompetent(worker, workType) {
+  function getSelectedPermitTypes() {
+    if (!elements.permitForm) return [];
+    return Array.from(elements.permitForm.querySelectorAll('input[name="hazards"]:checked'))
+      .map((input) => String(input.value || "").trim())
+      .filter((permitType) => permitType && permitType !== "Emergency")
+      .map(normalizeQualification)
+      .filter((permitType, index, list) =>
+        list.findIndex((item) => qualificationKey(item) === qualificationKey(permitType)) === index,
+      );
+  }
+
+  function getWorkerMatchedPermitTypes(worker, permitTypes) {
+    const required = (permitTypes || []).map(normalizeQualification);
+    const qualifications = normalizeQualifications(worker.qualifications || worker.permits);
+    return required.filter((permitType) =>
+      qualifications.some((qualification) => qualificationKey(qualification) === qualificationKey(permitType)),
+    );
+  }
+
+  function isWorkerCompetent(worker, permitTypes = []) {
     if (worker.status !== "valid") {
       return false;
     }
 
-    const required = (workTypeQualificationMap[workType] || ["Safety Induction"]).map(normalizeQualification);
-    const qualifications = normalizeQualifications(worker.qualifications);
-    return required.some((qualification) => qualifications.includes(qualification));
+    const required = (permitTypes || []).map(normalizeQualification).filter(Boolean);
+    if (!required.length) return true;
+
+    return getWorkerMatchedPermitTypes(worker, required).length === required.length;
   }
 
   function toUiStatus(status) {
-    if (status === "submitted" || status === "stage1_complete") return "pending";
+    if (status === "submitted" || status === "resubmitted" || status === "stage1_complete") return "pending";
     if (status === "approved" || status === "active") return "active";
     return status || "draft";
   }
@@ -967,7 +1034,7 @@
       notifications.push({
         id: `permit-returned-${permit.id}`,
         title: `${getDisplayPermitId(permit)} needs revision`,
-        detail: permit.title || permit.workType || "Returned permit",
+        detail: permit.latestRejectionReason || permit.title || permit.workType || "Returned permit",
         meta: formatDateTime(permit.updatedAt || permit.createdAt),
         view: "permits",
         filter: "rejected",
@@ -1168,6 +1235,29 @@
     return String(type || "").trim().toUpperCase();
   }
 
+  function normalizeStructuredData(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+    return Object.entries(value).reduce((normalized, [key, rawValue]) => {
+      const cleanKey = String(key || "").trim();
+      if (!cleanKey) return normalized;
+
+      if (Array.isArray(rawValue)) {
+        const items = rawValue.map((item) => String(item || "").trim()).filter(Boolean);
+        if (items.length) normalized[cleanKey] = items;
+        return normalized;
+      }
+
+      const cleanValue = String(rawValue || "").trim();
+      if (cleanValue) normalized[cleanKey] = cleanValue;
+      return normalized;
+    }, {});
+  }
+
+  function isStructuredDocumentType(type) {
+    return ["MOS", "JSA"].includes(String(type || "").trim().toUpperCase());
+  }
+
   function normalizeDocuments(documents, description) {
     const normalized = new Map();
     const sources = [
@@ -1181,6 +1271,7 @@
 
       if (type && name) {
         const existing = normalized.get(type) || {};
+        const structuredData = normalizeStructuredData(document?.structuredData || existing.structuredData);
         normalized.set(type, {
           ...existing,
           type,
@@ -1189,6 +1280,11 @@
           fileName: String(document?.fileName || document?.filename || name).trim(),
           mimeType: String(document?.mimeType || document?.attachmentMimeType || existing.mimeType || "").trim(),
           hasAttachment: Boolean(document?.hasAttachment || document?.attachmentData || existing.hasAttachment),
+          ...(isStructuredDocumentType(type) && Object.keys(structuredData).length ? { structuredData } : {}),
+          ...(document?.source || existing.source ? { source: String(document?.source || existing.source).trim() } : {}),
+          ...(document?.templateVersion || existing.templateVersion
+            ? { templateVersion: String(document?.templateVersion || existing.templateVersion).trim() }
+            : {}),
         });
       }
     });
@@ -1267,7 +1363,7 @@
         permit.workType,
         permit.location,
         formatStatus(permit.status),
-        permit.isEmergency ? "emergency safety officer" : "normal supervisor",
+        permit.isEmergency ? "emergency safety officer" : "normal admin reviewer",
       ]
         .join(" ")
         .toLowerCase()
@@ -1283,6 +1379,7 @@
       return;
     }
 
+    elements.table?.classList.remove("worker-table");
     renderPermitToolbar();
     renderPermitTableHead();
     const rows = getFilteredPermits();
@@ -1353,7 +1450,7 @@
   function renderPermitRow(permit) {
     const uiStatus = toUiStatus(permit.status);
     const displayType = permit.isEmergency ? "Emergency Permit" : permit.workType;
-    const icon = typeIcons[displayType] || typeIcons["General Maintenance"];
+    const icon = typeIcons[displayType] || typeIcons["Preventive Maintenance"];
     const displayId = getDisplayPermitId(permit);
 
     return `
@@ -1376,22 +1473,15 @@
 
   function renderWorkerProfiles() {
     const query = state.query.trim().toLowerCase();
+    elements.table?.classList.add("worker-table");
     elements.recentRequestsTitle.textContent = "Worker Profiles";
-    elements.tableToolbar.innerHTML = `
-      <button class="filter-button" type="button" id="createWorkerProfileButton">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 5v14M5 12h14" />
-        </svg>
-        Add Worker
-      </button>
-    `;
+    elements.tableToolbar.innerHTML = "";
     elements.tableHead.innerHTML = `
       <tr>
         <th>Worker</th>
         <th>Position / Company</th>
         <th>Permit Types</th>
         <th>Status</th>
-        <th>Action</th>
       </tr>
     `;
 
@@ -1423,7 +1513,7 @@
     if (!rows.length) {
       elements.tableBody.innerHTML = `
         <tr>
-          <td class="empty-row" colspan="5">No worker profiles match the current search.</td>
+          <td class="empty-row" colspan="4">No worker profiles match the current search.</td>
         </tr>
       `;
       return;
@@ -1454,11 +1544,6 @@
           .join("")
       : "No certifications";
     const status = String(worker.status || "submitted").toLowerCase();
-    const canEdit = status !== "valid";
-    const workerId = escapeHtml(worker.systemId || worker.id);
-    const workerActions = canEdit
-      ? `${rowButton("edit-worker", workerId, "Edit", "primary")}${rowButton("delete-worker", workerId, "Delete", "danger")}`
-      : '<span class="route-note">Valid</span>';
     const returnReason =
       status === "rejected" && worker.reviewComment
         ? `
@@ -1501,7 +1586,6 @@
           <span class="status-pill ${status === "valid" ? "active" : status === "rejected" ? "rejected" : "pending"}">${escapeHtml(workerStatusLabel(worker.status))}</span>
           ${returnReason}
         </td>
-        <td><div class="row-actions">${workerActions}</div></td>
       </tr>
     `;
   }
@@ -1560,24 +1644,29 @@
   }
 
   function renderWorkerOptions(selectedWorkerIds = []) {
-    const workType = elements.permitForm.elements.workType.value || "Hot Work";
+    const permitTypes = getSelectedPermitTypes();
     const selected = new Set(selectedWorkerIds);
 
     elements.workerOptions.innerHTML = state.workers
       .map((worker) => {
-        const competent = isWorkerCompetent(worker, workType);
+        const competent = isWorkerCompetent(worker, permitTypes);
         const checked = selected.has(worker.id) && competent ? "checked" : "";
         const disabled = competent ? "" : "disabled";
         const stateClass = competent ? "" : "is-disabled";
-        const qualifications = normalizeQualifications(worker.qualifications);
-        const required = (workTypeQualificationMap[workType] || ["Safety Induction"]).map(normalizeQualification);
-        const missing = required.filter((qualification) => !qualifications.includes(qualification));
-        let note = `Eligible for ${workType}`;
+        const matched = getWorkerMatchedPermitTypes(worker, permitTypes);
+        const missing = permitTypes.filter((permitType) =>
+          !matched.some((match) => qualificationKey(match) === qualificationKey(permitType)),
+        );
+        let note = permitTypes.length
+          ? `Eligible for ${permitTypes.join(", ")}`
+          : "Select permit type to verify competency";
 
-        if (!competent && worker.status !== "valid") {
-          note = "Worker status not valid";
+        if (!competent && worker.status === "inactive") {
+          note = "Inactive - cannot be assigned";
+        } else if (!competent && worker.status !== "valid") {
+          note = `${workerStatusLabel(worker.status)} - cannot be assigned`;
         } else if (!competent) {
-          note = missing.length ? `Missing: ${missing.join(", ")}` : `Not eligible for ${workType}`;
+          note = missing.length ? `Missing permit type: ${missing.join(", ")}` : "Not eligible for selected permit type";
         }
 
         return `
@@ -1627,14 +1716,251 @@
       fileName: existing?.fileName || existingName,
       mimeType: existing?.mimeType || "",
       hasAttachment: Boolean(existing?.hasAttachment),
+      ...(existing?.structuredData ? { structuredData: normalizeStructuredData(existing.structuredData) } : {}),
+      ...(existing?.source ? { source: existing.source } : {}),
+      ...(existing?.templateVersion ? { templateVersion: existing.templateVersion } : {}),
     };
+  }
+
+  function getStructuredDocuments(documents = []) {
+    return normalizeDocuments(documents)
+      .filter((document) => isStructuredDocumentType(document.type) && Object.keys(normalizeStructuredData(document.structuredData)).length)
+      .map((document) => ({
+        ...document,
+        name: document.name || `${document.type} digital form`,
+        hasAttachment: Boolean(document.hasAttachment),
+      }));
+  }
+
+  function upsertStructuredDocuments(documents = []) {
+    const byType = new Map(state.structuredDocuments.map((document) => [document.type, document]));
+    getStructuredDocuments(documents).forEach((document) => {
+      byType.set(document.type, document);
+    });
+    state.structuredDocuments = Array.from(byType.values());
+  }
+
+  function getStructuredDocument(type) {
+    return state.structuredDocuments.find((document) => document.type === type) || null;
+  }
+
+  function buildStructuredDocument(type, structuredData = {}) {
+    return {
+      type,
+      name: `${type} digital form`,
+      source: "mos-jsa-digital-form",
+      structuredData: normalizeStructuredData(structuredData),
+    };
+  }
+
+  function readDigitalDocumentEditor() {
+    if (!elements.digitalDocumentEditor) return [];
+
+    return Object.keys(digitalDocumentSchemas)
+      .map((type) => {
+        const structuredData = {};
+        elements.digitalDocumentEditor
+          .querySelectorAll(`[data-digital-doc-type="${type}"]`)
+          .forEach((field) => {
+            const key = field.dataset.digitalDocField;
+            const value = String(field.value || "").trim();
+            if (key && value) structuredData[key] = value;
+          });
+
+        return buildStructuredDocument(type, structuredData);
+      })
+      .filter((document) => Object.keys(document.structuredData).length);
+  }
+
+  function syncStructuredDocumentsFromEditor() {
+    const editedDocuments = readDigitalDocumentEditor();
+    const byType = new Map(state.structuredDocuments.map((document) => [document.type, document]));
+
+    Object.keys(digitalDocumentSchemas).forEach((type) => byType.delete(type));
+    editedDocuments.forEach((document) => byType.set(document.type, document));
+    state.structuredDocuments = Array.from(byType.values());
+    return editedDocuments;
+  }
+
+  function renderDigitalDocumentEditor(existingDocuments = []) {
+    if (!elements.digitalDocumentEditor) return;
+
+    const existingStructured = getStructuredDocuments(existingDocuments);
+    elements.digitalDocumentEditor.innerHTML = Object.entries(digitalDocumentSchemas)
+      .map(([type, schema]) => {
+        const document = getStructuredDocument(type) || existingStructured.find((item) => item.type === type) || {};
+        const data = normalizeStructuredData(document.structuredData);
+
+        return `
+          <section class="digital-document-form">
+            <h4>${escapeHtml(schema.title)}</h4>
+            <div class="digital-document-fields">
+              ${schema.fields
+                .map((field) => {
+                  const value = data[field.key] || "";
+                  const control =
+                    field.input === "textarea"
+                      ? `<textarea data-digital-doc-type="${escapeHtml(type)}" data-digital-doc-field="${escapeHtml(field.key)}" placeholder="${escapeHtml(field.help)}">${escapeHtml(value)}</textarea>`
+                      : `<input data-digital-doc-type="${escapeHtml(type)}" data-digital-doc-field="${escapeHtml(field.key)}" value="${escapeHtml(value)}" placeholder="${escapeHtml(field.help)}" />`;
+                  return `
+                    <label class="digital-document-field ${field.input === "textarea" ? "is-wide" : ""}">
+                      <span>${escapeHtml(field.label)}</span>
+                      ${control}
+                      <small>${escapeHtml(field.help)}</small>
+                    </label>
+                  `;
+                })
+                .join("")}
+            </div>
+          </section>
+        `;
+      })
+      .join("");
+  }
+
+  function renderDigitalDocumentStatus(existingDocuments = []) {
+    if (!elements.digitalDocumentStatus) return;
+
+    const existingStructured = getStructuredDocuments(existingDocuments);
+    const types = ["MOS", "JSA"];
+
+    elements.digitalDocumentStatus.innerHTML = types
+      .map((type) => {
+        const imported = getStructuredDocument(type) || existingStructured.find((document) => document.type === type);
+        const ready = Boolean(imported && Object.keys(normalizeStructuredData(imported.structuredData)).length);
+        return `
+          <span class="${ready ? "is-ready" : ""}">
+            <strong>${escapeHtml(type)}</strong>
+            ${ready ? "Digital form ready" : "Fill online or import Excel"}
+          </span>
+        `;
+      })
+      .join("");
+  }
+
+  async function downloadMosJsaTemplate() {
+    try {
+      syncStructuredDocumentsFromEditor();
+      const response = await fetch(`${API_BASE}/api/permit-document-templates/mos-jsa/export`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          Authorization: `Bearer ${state.session?.token || OFFLINE_TOKEN}`,
+        },
+        body: JSON.stringify({ documents: state.structuredDocuments }),
+      });
+
+      if (!response.ok) throw new Error("Template download failed");
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "MOS-JSA-digital-form-template.xlsx";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      showToast("Unable to download MOS/JSA Excel template.");
+    }
+  }
+
+  function permitExportFileName(permit) {
+    const label = String(getDisplayPermitId(permit) || permit?.id || permit?.title || "permit")
+      .trim()
+      .replace(/[\\/:*?"<>|]+/g, "-")
+      .replace(/\s+/g, "-");
+    return `${label || "permit"}-MOS-JSA.xlsx`;
+  }
+
+  async function downloadPermitMosJsaExcel(permit) {
+    const documents = getStructuredDocuments(permit?.documents || []);
+
+    if (!documents.length) {
+      throw new Error("No MOS/JSA digital form data available for export.");
+    }
+
+    const response = await fetch(`${API_BASE}/api/permit-document-templates/mos-jsa/export`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${state.session?.token || OFFLINE_TOKEN}`,
+      },
+      body: JSON.stringify({ documents }),
+    });
+
+    if (!response.ok) {
+      let message = "Unable to export MOS/JSA Excel.";
+      try {
+        const body = await response.json();
+        message = body.error || message;
+      } catch {
+        // Ignore non-JSON response bodies.
+      }
+      throw new Error(message);
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = permitExportFileName(permit);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function importMosJsaTemplate(file) {
+    if (!file) return;
+
+    try {
+      if (!/\.xlsx$/i.test(file.name)) {
+        showToast("Upload the completed MOS/JSA .xlsx template.");
+        return;
+      }
+
+      if (file.size > MAX_PERMIT_DOCUMENT_BYTES) {
+        showToast("MOS/JSA Excel template must be 5 MB or smaller.");
+        return;
+      }
+
+      const attachmentData = await readFileAsBase64(file);
+      const result = await apiRequest("/api/permit-document-templates/mos-jsa/import", {
+        method: "POST",
+        body: JSON.stringify({
+          fileName: file.name,
+          attachmentData,
+        }),
+      });
+
+      upsertStructuredDocuments(result.documents || []);
+      const existingPermit = state.editingId ? findPermit(state.editingId) : null;
+      renderDigitalDocumentEditor(existingPermit?.documents || []);
+      renderDigitalDocumentStatus(existingPermit?.documents || []);
+      updateDocumentStatuses(existingPermit?.documents || []);
+      showToast("MOS/JSA Excel form imported.");
+    } catch (error) {
+      showToast(error.error || "Unable to import MOS/JSA Excel template.");
+    } finally {
+      if (elements.importMosJsaTemplateInput) {
+        elements.importMosJsaTemplateInput.value = "";
+      }
+    }
   }
 
   function getDocumentRequirements(workType, isEmergency = state.isEmergencyPermit) {
     return [
-      ...commonDocumentRequirements,
       ...(isEmergency ? emergencyDocumentRequirements : []),
       ...(permitDocumentRequirements[workType] || []),
+    ];
+  }
+
+  function getRequiredDocumentTypes(workType, isEmergency = state.isEmergencyPermit) {
+    return [
+      ...digitalDocumentRequirements,
+      ...getDocumentRequirements(workType, isEmergency),
     ];
   }
 
@@ -1656,24 +1982,39 @@
   }
 
   async function readRequiredDocuments(form, existingDocuments = []) {
-    const workType = form.elements.workType.value || "General Maintenance";
-    const documents = await Promise.all(
-      getDocumentRequirements(workType).map((requirement) =>
-        getSelectedDocument(form, requirement.inputName, requirement.type, existingDocuments),
-      ),
+    syncStructuredDocumentsFromEditor();
+    const workType = form.elements.workType.value || "Preventive Maintenance";
+    const digitalDocuments = digitalDocumentRequirements
+      .map((requirement) => {
+        const structured = getStructuredDocument(requirement.type);
+        if (!structured) return null;
+        return {
+          ...structured,
+          type: requirement.type,
+          name: structured.name || `${requirement.type} digital form`,
+          structuredData: normalizeStructuredData(structured.structuredData),
+        };
+      })
+      .filter(Boolean);
+    const uploadedDocuments = await Promise.all(
+      getDocumentRequirements(workType).map((requirement) => {
+        const file = form.elements[requirement.inputName]?.files?.[0];
+        if (!file && isStructuredDocumentType(requirement.type)) return null;
+        return getSelectedDocument(form, requirement.inputName, requirement.type, existingDocuments);
+      }),
     );
 
-    return documents.filter(Boolean);
+    return [...digitalDocuments, ...uploadedDocuments.filter(Boolean)];
   }
 
   function hasRequiredDocuments(documents, workType) {
-    return getDocumentRequirements(workType).every((requirement) =>
+    return getRequiredDocumentTypes(workType).every((requirement) =>
       Boolean(getDocumentName(documents, requirement.type)),
     );
   }
 
   function renderDocumentUploads(existingDocuments = []) {
-    const workType = elements.permitForm.elements.workType.value || "General Maintenance";
+    const workType = elements.permitForm.elements.workType.value || "Preventive Maintenance";
     const requirements = getDocumentRequirements(workType);
 
     elements.documentGrid.innerHTML = requirements
@@ -1687,7 +2028,7 @@
               accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
               data-document-type="${escapeHtml(requirement.type)}"
             />
-            <small data-document-status="${escapeHtml(requirement.type)}">Required for Stage 1</small>
+            <small data-document-status="${escapeHtml(requirement.type)}">Required for MOS Approval</small>
           </label>
         `,
       )
@@ -1700,29 +2041,38 @@
       });
     });
 
+    renderDigitalDocumentEditor(existingDocuments);
     updateDocumentStatuses(existingDocuments);
+    renderDigitalDocumentStatus(existingDocuments);
   }
 
   function updateDocumentStatuses(existingDocuments = []) {
-    getDocumentRequirements(elements.permitForm.elements.workType.value || "General Maintenance").forEach(
+    getDocumentRequirements(elements.permitForm.elements.workType.value || "Preventive Maintenance").forEach(
       (requirement) => {
         const file = elements.permitForm.elements[requirement.inputName]?.files?.[0];
-        const name = file?.name || getDocumentName(existingDocuments, requirement.type);
+        const structured = isStructuredDocumentType(requirement.type) ? getStructuredDocument(requirement.type) : null;
+        const name = file?.name || structured?.name || getDocumentName(existingDocuments, requirement.type);
         const status = elements.documentGrid.querySelector(
           `[data-document-status="${requirement.type}"]`,
         );
 
         if (status) {
-          status.textContent = name ? `Selected: ${name}` : "Required for Stage 1";
+          status.textContent = structured && !file
+            ? `Digital form: ${structured.name}`
+            : name
+              ? `Selected: ${name}`
+              : "Required for MOS Approval";
         }
       },
     );
+    renderDigitalDocumentStatus(existingDocuments);
   }
 
   function setApproverOptions(mode, selectedValue = "") {
     const options = approverOptions[mode] || approverOptions.normal;
-    const placeholder = mode === "emergency" ? "Safety officer" : "Select supervisor";
     const approverSelect = elements.permitForm.elements.approvers;
+    if (!approverSelect) return;
+    const placeholder = mode === "emergency" ? "Safety officer" : "Admin reviewer";
 
     approverSelect.innerHTML = [
       `<option value="">${placeholder}</option>`,
@@ -1759,6 +2109,7 @@
   async function openCreatePermit() {
     state.editingId = null;
     state.isEmergencyPermit = false;
+    state.structuredDocuments = [];
     setPermitDialogEmergencyMode(false);
     elements.permitDialogTitle.textContent = "Create Permit Request";
     elements.permitDialogSubtitle.textContent = "Save the permit package for Admin Lane 2 draft review.";
@@ -1780,17 +2131,18 @@
     const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
 
     state.editingId = null;
+    state.structuredDocuments = [];
     elements.permitDialogTitle.textContent = "Emergency Permit Request";
     setPermitDialogEmergencyMode(true);
     elements.permitDialogSubtitle.textContent =
-      "Submit urgent work directly to Safety Officer emergency review. HIRARC and JSA are still required for submission.";
+      "Submit urgent work directly to Safety Officer emergency review. MOS and JSA are still required for submission.";
     setSubmitButtonLabel("Submit to Safety Officer");
 
     const form = elements.permitForm;
     form.reset();
     form.elements.id.value = "";
     form.elements.title.value = "Emergency Permit Request";
-    form.elements.workType.value = "General Maintenance";
+    form.elements.workType.value = "Preventive Maintenance";
     form.elements.location.value = "";
     form.elements.startDateTime.value = toLocalInputValue(start);
     form.elements.endDateTime.value = toLocalInputValue(end);
@@ -1801,6 +2153,9 @@
       "Safety officer notified",
       "Stop work authority confirmed",
     ].join("\n");
+    form.querySelectorAll('[name="ppe"]').forEach((checkbox) => {
+      checkbox.checked = false;
+    });
     state.isEmergencyPermit = true;
     setApproverOptions("emergency", "Sarah Safety");
     syncEmergencyPermitControls();
@@ -1822,6 +2177,7 @@
     }
 
     state.editingId = permit.id;
+    state.structuredDocuments = getStructuredDocuments(permit.documents || []);
     elements.permitDialogTitle.textContent = isRevision ? "Revise Rejected Permit" : "Edit Draft Permit";
     elements.permitDialogSubtitle.textContent = isRevision
       ? permit.isEmergency
@@ -1836,7 +2192,7 @@
     form.reset();
     form.elements.id.value = permit.id;
     form.elements.title.value = permit.title || "";
-    form.elements.workType.value = permit.workType || "General Maintenance";
+    form.elements.workType.value = permit.workType || "Preventive Maintenance";
     form.elements.location.value = permit.location || "";
     form.elements.startDateTime.value = toLocalInputValue(permit.startDateTime);
     form.elements.endDateTime.value = toLocalInputValue(permit.endDateTime);
@@ -1845,7 +2201,13 @@
     state.isEmergencyPermit = Boolean(permit.isEmergency);
     setPermitDialogEmergencyMode(state.isEmergencyPermit);
     syncEmergencyPermitControls();
-    form.elements.ppe.value = (permit.ppe || []).join(", ");
+    const selectedPpe = (permit.ppe || []).map((item) => String(item).toLowerCase());
+    form.querySelectorAll('[name="ppe"]').forEach((checkbox) => {
+      const optionText = checkbox.closest("label")?.textContent?.toLowerCase() || "";
+      checkbox.checked = selectedPpe.some((item) =>
+        item === String(checkbox.value).toLowerCase() || optionText.includes(item),
+      );
+    });
     setApproverOptions(
       state.isEmergencyPermit ? "emergency" : "normal",
       state.isEmergencyPermit ? "Sarah Safety" : permit.approvers?.[0],
@@ -2070,9 +2432,13 @@
     try {
       const payload = await readWorkerProfileForm();
       if (!payload) return;
+      const workerId = elements.workerForm.elements.id.value;
+      if (!workerId) {
+        showToast("Only Admin can add worker profiles.");
+        return;
+      }
 
       if (state.mode === "online") {
-        const workerId = elements.workerForm.elements.id.value;
         if (workerId) {
           await apiRequest(`/api/workers/${encodeURIComponent(workerId)}`, {
             method: "PATCH",
@@ -2126,14 +2492,20 @@
       .getAll("hazards")
       .map(String)
       .filter((hazard) => isEmergency || hazard !== "Emergency");
-    const approvers = isEmergency ? ["Sarah Safety"] : splitList(formData.get("approvers"));
+    const permitTypes = hazards
+      .filter((hazard) => hazard !== "Emergency")
+      .map(normalizeQualification)
+      .filter((hazard, index, list) =>
+        list.findIndex((item) => qualificationKey(item) === qualificationKey(hazard)) === index,
+      );
+    const approvers = isEmergency ? ["Sarah Safety"] : ["PTW Admin"];
     const documents = await readRequiredDocuments(form, existingPermit?.documents || []);
     const assignedWorkers = formData
       .getAll("assignedWorkers")
       .map(String)
       .filter((workerId) => {
         const worker = getWorkerById(workerId);
-        return worker && isWorkerCompetent(worker, workType);
+        return worker && isWorkerCompetent(worker, permitTypes);
       });
 
     if (!title || !workType || !location || !description || !startDateTime || !endDateTime) {
@@ -2142,17 +2514,12 @@
     }
 
     if (shouldSubmit && !assignedWorkers.length) {
-      showToast(`Assign at least one competent worker for ${workType}.`);
+      showToast("Assign at least one competent worker for the selected permit type.");
       return null;
     }
 
     if (shouldSubmit && !hasRequiredDocuments(documents, workType)) {
-      showToast(`Attach all Stage 1 documents required for ${workType}.`);
-      return null;
-    }
-
-    if (shouldSubmit && !approvers.length) {
-      showToast(isEmergency ? "Safety officer route is required." : "Select a supervisor.");
+      showToast(`Complete MOS/JSA digital forms and required supporting attachments for ${workType}.`);
       return null;
     }
 
@@ -2161,9 +2528,6 @@
       return null;
     }
 
-    const documentLines = formatDocuments(documents)
-      ? ["Required Documents:", formatDocuments(documents)]
-      : [];
     const assignedWorkerIdentifiers = buildAssignedWorkerIdentifiers(assignedWorkers);
 
     return {
@@ -2173,10 +2537,9 @@
       description: [
         `Permit Class: ${isEmergency ? "Emergency" : "Normal"}`,
         `Review Route: ${isEmergency ? "Safety Officer" : "Admin Lane 2 -> Safety Officer"}`,
-        `Permit Type: ${workType}`,
+        `Permit Type: ${permitTypes.join(", ") || "-"}`,
         `Assigned Workers: ${formatAssignedWorkers(assignedWorkers)}`,
         `Assigned Worker IDs: ${assignedWorkerIdentifiers.join(", ") || "-"}`,
-        ...documentLines,
         "",
         description,
       ].join("\n"),
@@ -2184,11 +2547,9 @@
       endDateTime,
       hazards: isEmergency
         ? [...new Set([...hazards, "Emergency"])]
-        : hazards.length
-          ? hazards
-          : [workType],
+        : hazards,
       controls: splitList(formData.get("controls")),
-      ppe: splitList(formData.get("ppe")),
+      ppe: formData.getAll("ppe").map(String),
       approvers,
       documents,
       assignedWorkers: assignedWorkerIdentifiers,
@@ -2418,13 +2779,31 @@
     elements.detailTitle.textContent = `${getDisplayPermitId(permit)} - ${permit.title || permit.workType}`;
     elements.detailSubtitle.textContent = `${permit.workType} - ${formatStatus(permit.status)}`;
     elements.detailList.innerHTML = detailRows(permit);
+    elements.detailList.querySelector("[data-detail-mos-jsa-export]")?.addEventListener("click", () => {
+      downloadPermitMosJsaExcel(permit)
+        .then(() => showToast("MOS/JSA Excel exported."))
+        .catch((error) => showToast(error.message || "Unable to export MOS/JSA Excel."));
+    });
     elements.permitDetailDialog.showModal();
   }
 
   function detailRows(permit) {
     const displayId = getDisplayPermitId(permit);
     const uiStatus = toUiStatus(permit.status);
-    const permitClass = permit.isEmergency ? "Emergency - Safety Officer" : "Normal - Supervisor";
+    const permitClass = permit.isEmergency ? "Emergency - Safety Officer" : "Normal - Admin";
+    const rejectionSection =
+      uiStatus === "rejected"
+        ? `
+          <section class="detail-section">
+            <h4>Latest Rejection Reason</h4>
+            <div class="detail-grid">
+              ${detailItem("Reason", renderTextBlock(permit.latestRejectionReason || "No rejection reason recorded."), true, true)}
+              ${detailItem("Returned By", permit.latestRejectionBy || permit.latestRejectionByRole || "Reviewer")}
+              ${detailItem("Returned At", formatDateTime(permit.latestRejectionAt))}
+            </div>
+          </section>
+        `
+        : "";
 
     return `
       <div class="detail-hero">
@@ -2435,6 +2814,8 @@
         </div>
         <span class="status-pill ${escapeHtml(uiStatus)}">${escapeHtml(formatStatus(permit.status))}</span>
       </div>
+
+      ${rejectionSection}
 
       <section class="detail-section">
         <h4>Work Details</h4>
@@ -2451,17 +2832,18 @@
       <section class="detail-section">
         <h4>Safety Controls</h4>
         <div class="detail-grid">
-          ${detailItem("Hazards", renderChips(permit.hazards), false, true)}
+          ${detailItem("Permit Type", renderChips(permit.hazards), false, true)}
           ${detailItem("PPE", renderChips(permit.ppe), false, true)}
           ${detailItem("Controls", renderMultiline(permit.controls), true, true)}
-          ${detailItem("Approvers", renderChips(permit.approvers), true, true)}
+          ${detailItem("Admin Reviewer", renderChips(permit.approvers), true, true)}
         </div>
       </section>
 
       <section class="detail-section">
         <h4>Documents and Scope</h4>
         <div class="detail-grid">
-          ${detailItem("Required Documents", renderDocuments(permit.documents), true, true)}
+          ${renderDigitalEvidenceDetail(permit)}
+          ${renderSupportingDocumentsDetail(permit.documents)}
           ${detailItem("Scope", renderTextBlock(extractScope(permit.description) || "-"), true, true)}
         </div>
       </section>
@@ -2470,7 +2852,6 @@
         <h4>Audit Trail</h4>
         <div class="detail-grid">
           ${detailItem("Audit", renderAuditTrail(permit.auditLogs), true, true)}
-          ${detailItem("System ID", permit.id, true)}
         </div>
       </section>
     `;
@@ -2510,9 +2891,85 @@
     `;
   }
 
+  function renderDigitalEvidenceDetail(permit) {
+    const documents = getStructuredDocuments(permit.documents || []);
+    if (!documents.length) return "";
+
+    return detailItem(
+      "MOS / JSA Digital Evidence",
+      `
+        <div class="detail-digital-evidence">
+          <div class="detail-digital-evidence-head">
+            <span>${documents.length}/2 forms completed</span>
+            <button class="detail-export-button" type="button" data-detail-mos-jsa-export>Export Excel</button>
+          </div>
+          <div class="detail-digital-evidence-grid">
+            ${documents.map(renderStructuredDocumentDetail).join("")}
+          </div>
+        </div>
+      `,
+      true,
+      true,
+    );
+  }
+
+  function renderStructuredDocumentDetail(document) {
+    const type = String(document.type || "").trim().toUpperCase();
+    const schema = digitalDocumentSchemas[type] || { title: `${type} Digital Form`, fields: [] };
+    const data = normalizeStructuredData(document.structuredData);
+    const fieldLabels = Object.fromEntries((schema.fields || []).map((field) => [field.key, field.label]));
+    const knownRows = (schema.fields || [])
+      .map((field) => [field.label, data[field.key]])
+      .filter(([, value]) => hasStructuredValue(value));
+    const extraRows = Object.entries(data)
+      .filter(([key]) => !fieldLabels[key])
+      .map(([key, value]) => [formatStructuredFieldLabel(key), value]);
+    const rows = [...knownRows, ...extraRows];
+
+    return `
+      <article class="detail-digital-card">
+        <strong>${escapeHtml(schema.title)}</strong>
+        <dl>
+          ${rows
+            .map(
+              ([label, value]) => `
+                <div>
+                  <dt>${escapeHtml(label)}</dt>
+                  <dd>${escapeHtml(formatStructuredValue(value))}</dd>
+                </div>
+              `,
+            )
+            .join("")}
+        </dl>
+      </article>
+    `;
+  }
+
+  function hasStructuredValue(value) {
+    return Array.isArray(value) ? value.length > 0 : Boolean(String(value || "").trim());
+  }
+
+  function formatStructuredValue(value) {
+    return Array.isArray(value) ? value.join("\n") : String(value || "");
+  }
+
+  function formatStructuredFieldLabel(key) {
+    return String(key || "")
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/[_-]+/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+
+  function renderSupportingDocumentsDetail(documents) {
+    const html = renderDocuments(documents);
+    return html ? detailItem("Supporting Files", html, true, true) : "";
+  }
+
   function renderDocuments(documents) {
-    const items = Array.isArray(documents) ? documents : [];
-    if (!items.length) return renderTextBlock("-");
+    const items = (Array.isArray(documents) ? documents : []).filter(
+      (document) => document?.hasAttachment && !isStructuredDocumentType(document.type),
+    );
+    if (!items.length) return "";
 
     return `
       <div class="detail-documents">
@@ -2651,6 +3108,10 @@
       }
 
       if (event.target.closest("#createWorkerProfileButton")) {
+        if (state.mode !== "offline") {
+          showToast("Only Admin can add worker profiles.");
+          return;
+        }
         openCreateWorkerProfile();
       }
     });
@@ -2731,6 +3192,16 @@
       event.preventDefault();
       saveWorkerProfile();
     });
+    elements.downloadMosJsaTemplateButton?.addEventListener("click", downloadMosJsaTemplate);
+    elements.importMosJsaTemplateInput?.addEventListener("change", (event) => {
+      importMosJsaTemplate(event.target.files?.[0]);
+    });
+    elements.digitalDocumentEditor?.addEventListener("input", () => {
+      syncStructuredDocumentsFromEditor();
+      const existingPermit = state.editingId ? findPermit(state.editingId) : null;
+      renderDigitalDocumentStatus(existingPermit?.documents || []);
+      updateDocumentStatuses(existingPermit?.documents || []);
+    });
     elements.permitForm.elements.workType.addEventListener("change", () => {
       const selectedWorkerIds = new FormData(elements.permitForm)
         .getAll("assignedWorkers")
@@ -2738,6 +3209,14 @@
       const existingPermit = state.editingId ? findPermit(state.editingId) : null;
       renderWorkerOptions(selectedWorkerIds);
       renderDocumentUploads(existingPermit?.documents || []);
+    });
+    elements.permitForm.querySelectorAll('input[name="hazards"]').forEach((checkbox) => {
+      checkbox.addEventListener("change", () => {
+        const selectedWorkerIds = new FormData(elements.permitForm)
+          .getAll("assignedWorkers")
+          .map(String);
+        renderWorkerOptions(selectedWorkerIds);
+      });
     });
     elements.permitForm.addEventListener("submit", (event) => {
       event.preventDefault();
