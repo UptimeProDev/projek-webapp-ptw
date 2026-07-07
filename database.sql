@@ -4,12 +4,25 @@ CREATE DATABASE IF NOT EXISTS ptw
 
 USE ptw;
 
+CREATE TABLE IF NOT EXISTS organizations (
+  id CHAR(36) PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  registration_no VARCHAR(120) NOT NULL UNIQUE,
+  admin_user_id CHAR(36),
+  created_at VARCHAR(40) NOT NULL,
+  updated_at VARCHAR(40) NOT NULL,
+  UNIQUE INDEX idx_organizations_registration_no (registration_no),
+  INDEX idx_organizations_admin_user_id (admin_user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS users (
   id CHAR(36) PRIMARY KEY,
   employee_id VARCHAR(20) NOT NULL UNIQUE,
   full_name VARCHAR(255) NOT NULL,
   email VARCHAR(255) NOT NULL UNIQUE,
   organization VARCHAR(255) NOT NULL,
+  organization_id CHAR(36),
+  company_registration_no VARCHAR(120),
   role VARCHAR(50) NOT NULL,
   roles LONGTEXT,
   password_hash VARCHAR(255) NOT NULL,
@@ -34,6 +47,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS permits (
   id CHAR(36) PRIMARY KEY,
+  organization_id CHAR(36),
   requested_by_id CHAR(36) NOT NULL,
   requested_by VARCHAR(255) NOT NULL,
   title VARCHAR(255) NOT NULL,
@@ -53,6 +67,7 @@ CREATE TABLE IF NOT EXISTS permits (
   status VARCHAR(40) NOT NULL,
   created_at VARCHAR(40) NOT NULL,
   updated_at VARCHAR(40) NOT NULL,
+  INDEX idx_permits_organization_id (organization_id),
   INDEX idx_permits_requested_by_id (requested_by_id),
   INDEX idx_permits_status (status),
   CONSTRAINT fk_permits_requested_by
@@ -62,6 +77,7 @@ CREATE TABLE IF NOT EXISTS permits (
 
 CREATE TABLE IF NOT EXISTS workers (
   id CHAR(36) PRIMARY KEY,
+  organization_id CHAR(36),
   ic_passport VARCHAR(80),
   employee_id VARCHAR(32) UNIQUE,
   name VARCHAR(255) NOT NULL,
@@ -78,6 +94,7 @@ CREATE TABLE IF NOT EXISTS workers (
   created_at VARCHAR(40) NOT NULL,
   updated_at VARCHAR(40) NOT NULL,
   UNIQUE INDEX idx_workers_ic_passport (ic_passport),
+  INDEX idx_workers_organization_id (organization_id),
   INDEX idx_workers_created_by (created_by)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

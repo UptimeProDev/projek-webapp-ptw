@@ -21,15 +21,16 @@ const visualMetrics = document.querySelector("#visualMetrics");
 const modeToggle = document.querySelector(".mode-toggle");
 
 const roleLabels = {
+  organization_admin: "Organization Admin",
   requester: "Requester",
   supervisor: "Supervisor",
   safety_officer: "Safety Officer",
   approver: "Supervisor",
   admin: "Admin",
-  worker: "Contractor / Worker",
+  worker: "Worker",
 };
 
-const rolePriority = ["admin", "safety_officer", "supervisor", "requester", "worker"];
+const rolePriority = ["organization_admin", "admin", "safety_officer", "supervisor", "requester", "worker"];
 
 function isStaticHtmlPage() {
   return location.protocol === "file:" || /\.html$/i.test(location.pathname);
@@ -46,6 +47,7 @@ function getAuthUrl(mode) {
 function getAppUrl(page) {
   if (isStaticHtmlPage()) {
     if (page === "admin") return "/admin.html";
+    if (page === "organization") return "/organization.html";
     if (page === "safety") return "/safety.html";
     if (page === "review") return "/supervisor.html";
     if (page === "approver") return "/supervisor.html";
@@ -58,6 +60,7 @@ function getAppUrl(page) {
 
 function getRoleDestination(role) {
   if (role === "requester") return getAppUrl("dashboard");
+  if (role === "organization_admin") return getAppUrl("organization");
   if (role === "admin") return getAppUrl("admin");
   if (role === "safety_officer") return getAppUrl("safety");
   if (role === "supervisor") return getAppUrl("review");
@@ -90,7 +93,7 @@ function setMode(mode) {
     visualEyebrow.textContent = "Compliance Redefined";
     visualTitle.textContent = "Secure the Future of Industrial Safety.";
     visualBody.textContent =
-      "Join the PTW Guardian network to streamline permits, manage compliance, and ensure every worker returns home safely.";
+      "Sign up to create your organization workspace, streamline permits, manage compliance, and ensure every worker returns home safely.";
     visualMetrics.innerHTML = `
       <div><span>ISO 27001 Certified</span></div>
       <div><span>256-bit Encryption</span></div>
@@ -258,7 +261,8 @@ function setActiveRoleAndRedirect(role) {
 }
 
 function getRoleDescription(role) {
-  if (role === "admin") return "Worker review, user roles, draft routing";
+  if (role === "admin") return "Worker review and draft routing";
+  if (role === "organization_admin") return "Organization users and workspace settings";
   if (role === "safety_officer") return "MOS Approval and safety review";
   if (role === "supervisor") return "Permit Approval and work release";
   if (role === "requester") return "Create and monitor permit requests";
@@ -350,6 +354,14 @@ signupForm.addEventListener("submit", async (event) => {
   setMessage(signupMessage, "");
 
   const data = new FormData(signupForm);
+  const password = data.get("password");
+  const confirmPassword = data.get("confirmPassword");
+
+  if (password !== confirmPassword) {
+    setBusy(signupForm, false);
+    setMessage(signupMessage, "Passwords do not match.");
+    return;
+  }
 
   try {
     const result = await apiRequest("/api/auth/signup", {
@@ -358,17 +370,16 @@ signupForm.addEventListener("submit", async (event) => {
         fullName: data.get("fullName"),
         email: data.get("email"),
         organization: data.get("organization"),
-        role: data.get("role"),
-        password: data.get("password"),
+        companyRegistrationNo: data.get("companyRegistrationNo"),
+        password,
+        confirmPassword,
         acceptTerms: data.get("acceptTerms") === "on",
       }),
     });
 
-    setMessage(signupMessage, "Account created.", "success");
-    if (handleAuthenticatedSession(result, true)) {
-      return;
-    }
-    renderSession(result.user);
+    setMessage(signupMessage, "Organization registered.", "success");
+    saveSession({ ...result, activeRole: "organization_admin" }, true);
+    window.location.href = getAppUrl("organization");
   } catch (error) {
     setMessage(signupMessage, getErrorMessage(error));
   } finally {

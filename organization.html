@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Organization Admin | PTW Guardian</title>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/organization.css?v=5" />
+</head>
+<body>
+  <div class="org-shell">
+    <aside class="org-sidebar">
+      <button class="org-sidebar-trigger" type="button" aria-label="Open sidebar menu">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+      <div class="org-brand">
+        <img src="/assets/ptw-guardian-login-v2.png" alt="PTW Guardian" />
+      </div>
+
+      <nav class="org-nav">
+        <button class="org-nav-item active" type="button">User Management</button>
+      </nav>
+
+      <div class="org-sidebar-footer">
+        <button class="org-side-button" id="supportButton" type="button">Support</button>
+        <button class="org-side-button" id="logoutButton" type="button">Logout</button>
+      </div>
+    </aside>
+
+    <main class="org-main">
+      <header class="org-topbar">
+        <button class="org-profile" type="button" id="profileButton" aria-label="Open account menu">
+          <span>
+            <strong id="profileName">Organization Admin</strong>
+            <small id="profileRole">Workspace Owner</small>
+          </span>
+          <span class="org-avatar" id="profileAvatar">OA</span>
+        </button>
+      </header>
+
+      <section class="org-workspace">
+        <div class="org-page-head">
+          <div>
+            <h1>Organization Admin</h1>
+            <p>Manage company users and assign PTW operational roles.</p>
+          </div>
+          <span class="org-badge" id="userCount">0 users</span>
+        </div>
+
+        <p class="org-status" id="sectionStatus" role="status" aria-live="polite">Loading organization workspace...</p>
+
+        <section class="org-summary" aria-label="Organization summary">
+          <div>
+            <span>Organization / Contractor Entity</span>
+            <strong id="organizationName">-</strong>
+          </div>
+          <div>
+            <span>Company Registration No. / Contractor ID</span>
+            <strong id="registrationNo">-</strong>
+          </div>
+          <div>
+            <span>Organization Admin</span>
+            <strong id="ownerName">-</strong>
+          </div>
+        </section>
+
+        <section class="org-panel">
+          <div class="org-panel-head">
+            <div>
+              <h2>Create Team Account</h2>
+              <p>Assign one or more operational roles to each user.</p>
+            </div>
+          </div>
+
+          <form class="org-user-form" id="createUserForm" autocomplete="off">
+            <div class="org-form-grid">
+              <label class="org-field">
+                <span>Full Name</span>
+                <input id="newUserFullName" name="fullName" type="text" placeholder="Team member full name" required>
+              </label>
+              <label class="org-field">
+                <span>Work Email</span>
+                <input id="newUserEmail" name="email" type="email" placeholder="name@company.com" required>
+              </label>
+            </div>
+
+            <div class="org-role-picker">
+              <span>Assign Roles</span>
+              <div class="org-role-options" id="newUserRoles"></div>
+            </div>
+
+            <div class="org-button-row">
+              <button class="org-button secondary" type="reset">Clear</button>
+              <button class="org-button" type="submit">Create User</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="org-panel">
+          <div class="org-panel-head">
+            <div>
+              <h2>Team Members</h2>
+              <p>Edit user details and operational access for this organization workspace.</p>
+            </div>
+          </div>
+          <div class="org-user-list" id="userList"></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <div class="org-modal-backdrop" id="editUserModal" hidden>
+    <section class="org-modal" role="dialog" aria-modal="true" aria-labelledby="editUserTitle">
+      <div class="org-modal-head">
+        <div>
+          <h2 id="editUserTitle">Edit User</h2>
+          <p id="editUserMeta">Team member access</p>
+        </div>
+        <button class="org-icon-button" id="closeEditModal" type="button" aria-label="Close edit form">x</button>
+      </div>
+
+      <form class="org-modal-form" id="editUserForm" autocomplete="off">
+        <input id="editUserId" type="hidden">
+        <div class="org-form-grid">
+          <label class="org-field">
+            <span>Name</span>
+            <input id="editUserFullName" name="fullName" type="text" required>
+          </label>
+          <label class="org-field">
+            <span>Email</span>
+            <input id="editUserEmail" name="email" type="email" required>
+          </label>
+        </div>
+        <div class="org-role-picker">
+          <span>Roles</span>
+          <div class="org-role-options org-modal-role-options" id="editUserRoles"></div>
+        </div>
+        <div class="org-danger-actions">
+          <button class="org-button warning" id="removeAccessButton" type="button">Remove Access</button>
+          <button class="org-button danger" id="deleteUserButton" type="button">Delete User</button>
+        </div>
+        <div class="org-button-row">
+          <button class="org-button secondary" id="cancelEditModal" type="button">Cancel</button>
+          <button class="org-button" type="submit">Save Changes</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <script src="/organization.js?v=5"></script>
+  <script src="/role-switcher.js?v=4"></script>
+</body>
+</html>

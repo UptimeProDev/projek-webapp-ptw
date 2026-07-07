@@ -1,6 +1,7 @@
 (function () {
   const SESSION_KEY = "ptwSession";
   const roleLabels = {
+    organization_admin: "Organization Admin",
     admin: "Admin",
     safety_officer: "Safety Officer",
     supervisor: "Supervisor",
@@ -8,8 +9,9 @@
     requester: "Requester",
     worker: "Worker",
   };
-  const rolePriority = ["admin", "safety_officer", "supervisor", "requester", "worker"];
+  const rolePriority = ["organization_admin", "admin", "safety_officer", "supervisor", "requester", "worker"];
   const rolePaths = {
+    organization_admin: "/organization",
     admin: "/admin",
     safety_officer: "/safety",
     supervisor: "/review",

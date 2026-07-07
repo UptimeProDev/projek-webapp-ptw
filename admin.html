@@ -17,7 +17,6 @@
       <nav class="nav">
         <button class="nav-item active" type="button">Worker Review</button>
         <button class="nav-item" type="button">Draft Review</button>
-        <button class="nav-item" type="button">User Roles</button>
         <button class="nav-item" type="button">Audit Trails</button>
       </nav>
 
@@ -208,19 +207,6 @@
               </div>
             </section>
 
-            <section id="userRolesSection" class="section-panel hidden">
-              <div class="detail-card">
-                <div class="list-head">
-                  <div>
-                    <h3>User Role Management</h3>
-                    <p class="muted">Assign one or more application access roles to each non-worker account.</p>
-                  </div>
-                  <span class="badge pending" id="userRoleCount">0 users</span>
-                </div>
-                <div class="user-role-list" id="userRoleList"></div>
-              </div>
-            </section>
-
             <section id="auditTrailsSection" class="section-panel hidden">
               <div class="detail-card">
                 <div class="list-head">
@@ -349,7 +335,7 @@
     </form>
   </dialog>
 
-  <script src="/role-switcher.js?v=3"></script>
+  <script src="/role-switcher.js?v=4"></script>
   <script src="/admin.js?v=lane2-25"></script>
 </body>
 </html>

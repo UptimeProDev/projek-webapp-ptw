@@ -18,6 +18,11 @@
     permitCodes: "ptwRequesterPermitCodes",
     workers: "ptwRequesterWorkers",
   };
+  const DRAFT_PLACEHOLDERS = {
+    title: "Untitled permit draft",
+    location: "Location pending",
+    description: "Scope pending",
+  };
 
   function isStaticHtmlPage() {
     return location.protocol === "file:" || /\.html$/i.test(location.pathname);
@@ -392,6 +397,7 @@
     permitForm: document.querySelector("#permitForm"),
     permitDialogTitle: document.querySelector("#permitDialogTitle"),
     permitDialogSubtitle: document.querySelector("#permitDialogSubtitle"),
+    keepDraftButton: document.querySelector("#keepDraftButton"),
     submitPermitButton: document.querySelector("#submitPermitButton"),
     permitDetailDialog: document.querySelector("#permitDetailDialog"),
     detailTitle: document.querySelector("#detailTitle"),
@@ -1597,10 +1603,10 @@
 
     if (uiStatus === "draft") {
       if (!permit.isEmergency) {
-        return `${rowButton("edit", id, "Edit")}${viewButton}${rowButton("cancel", id, "Cancel", "danger")}<span class="route-note">Admin review</span>`;
+        return `${rowButton("edit", id, "Edit Draft")}${viewButton}${rowButton("cancel", id, "Cancel", "danger")}<span class="route-note">Editable draft</span>`;
       }
 
-      return `${rowButton("edit", id, "Edit")}${rowButton("submit", id, "Submit", "primary")}${rowButton("cancel", id, "Cancel", "danger")}`;
+      return `${rowButton("edit", id, "Edit Draft")}${rowButton("submit", id, "Submit", "primary")}${rowButton("cancel", id, "Cancel", "danger")}`;
     }
 
     if (uiStatus === "pending") {
@@ -2112,7 +2118,7 @@
     state.structuredDocuments = [];
     setPermitDialogEmergencyMode(false);
     elements.permitDialogTitle.textContent = "Create Permit Request";
-    elements.permitDialogSubtitle.textContent = "Save the permit package for Admin Lane 2 draft review.";
+    elements.permitDialogSubtitle.textContent = "Keep a draft to finish later or send the completed package to Admin Lane 2.";
     setSubmitButtonLabel("Send to Admin Review");
     elements.permitForm.reset();
     elements.permitForm.elements.id.value = "";
@@ -2135,7 +2141,7 @@
     elements.permitDialogTitle.textContent = "Emergency Permit Request";
     setPermitDialogEmergencyMode(true);
     elements.permitDialogSubtitle.textContent =
-      "Submit urgent work directly to Safety Officer emergency review. MOS and JSA are still required for submission.";
+      "Keep an emergency draft or submit urgent work directly to Safety Officer emergency review.";
     setSubmitButtonLabel("Submit to Safety Officer");
 
     const form = elements.permitForm;
@@ -2184,8 +2190,8 @@
         ? "Update the returned emergency request before Safety Officer resubmission."
         : "Update the returned request. Admin Lane 2 must re-submit it after correction."
       : permit.isEmergency
-        ? "Update emergency draft details before Safety Officer submission."
-        : "Update draft details for Admin Lane 2 review.";
+        ? "Update this emergency draft, then keep it or submit it to Safety Officer review."
+        : "Update this saved draft, then keep it or send it for Admin Lane 2 review.";
     setSubmitButtonLabel(permit.isEmergency ? "Submit to Safety Officer" : "Send to Admin Review");
 
     const form = elements.permitForm;
@@ -2508,9 +2514,55 @@
         return worker && isWorkerCompetent(worker, permitTypes);
       });
 
-    if (!title || !workType || !location || !description || !startDateTime || !endDateTime) {
+    if (!workType) {
+      showToast("Select a work type.");
+      return null;
+    }
+
+    const hasCompleteSubmissionDetails =
+      title &&
+      title !== DRAFT_PLACEHOLDERS.title &&
+      location &&
+      location !== DRAFT_PLACEHOLDERS.location &&
+      description &&
+      description !== DRAFT_PLACEHOLDERS.description &&
+      startDateTime &&
+      endDateTime;
+
+    if (shouldSubmit && !hasCompleteSubmissionDetails) {
       showToast("Complete title, work type, location, scope, start time, and end time.");
       return null;
+    }
+
+    const payloadTitle = shouldSubmit ? title : title || DRAFT_PLACEHOLDERS.title;
+    const payloadLocation = shouldSubmit ? location : location || DRAFT_PLACEHOLDERS.location;
+    const payloadDescription = shouldSubmit ? description : description || DRAFT_PLACEHOLDERS.description;
+    const payloadStartDateTime = startDateTime || toLocalInputValue(null, 1);
+    let payloadEndDateTime = endDateTime;
+
+    if (!payloadEndDateTime) {
+      const parsedStart = new Date(payloadStartDateTime);
+      payloadEndDateTime = Number.isNaN(parsedStart.getTime())
+        ? toLocalInputValue(null, 5)
+        : toLocalInputValue(new Date(parsedStart.getTime() + 4 * 60 * 60 * 1000));
+    }
+
+    const parsedStart = new Date(payloadStartDateTime);
+    let parsedEnd = new Date(payloadEndDateTime);
+
+    if (Number.isNaN(parsedStart.getTime())) {
+      showToast("Choose a valid start time.");
+      return null;
+    }
+
+    if (Number.isNaN(parsedEnd.getTime()) || parsedEnd <= parsedStart) {
+      if (shouldSubmit) {
+        showToast("End time must be after start time.");
+        return null;
+      }
+
+      parsedEnd = new Date(parsedStart.getTime() + 4 * 60 * 60 * 1000);
+      payloadEndDateTime = toLocalInputValue(parsedEnd);
     }
 
     if (shouldSubmit && !assignedWorkers.length) {
@@ -2523,17 +2575,12 @@
       return null;
     }
 
-    if (new Date(endDateTime) <= new Date(startDateTime)) {
-      showToast("End time must be after start time.");
-      return null;
-    }
-
     const assignedWorkerIdentifiers = buildAssignedWorkerIdentifiers(assignedWorkers);
 
     return {
-      title,
+      title: payloadTitle,
       workType,
-      location,
+      location: payloadLocation,
       description: [
         `Permit Class: ${isEmergency ? "Emergency" : "Normal"}`,
         `Review Route: ${isEmergency ? "Safety Officer" : "Admin Lane 2 -> Safety Officer"}`,
@@ -2541,10 +2588,10 @@
         `Assigned Workers: ${formatAssignedWorkers(assignedWorkers)}`,
         `Assigned Worker IDs: ${assignedWorkerIdentifiers.join(", ") || "-"}`,
         "",
-        description,
+        payloadDescription,
       ].join("\n"),
-      startDateTime,
-      endDateTime,
+      startDateTime: payloadStartDateTime,
+      endDateTime: payloadEndDateTime,
       hazards: isEmergency
         ? [...new Set([...hazards, "Emergency"])]
         : hazards,
@@ -2558,9 +2605,14 @@
   }
 
   async function savePermit(shouldSubmit) {
+    const actionButtons = [elements.keepDraftButton, elements.submitPermitButton].filter(Boolean);
     try {
       const payload = await readPermitForm(shouldSubmit);
       if (!payload) return;
+
+      actionButtons.forEach((button) => {
+        button.disabled = true;
+      });
 
       const id = elements.permitForm.elements.id.value;
       const shouldDirectSubmit = shouldSubmit && payload.isEmergency;
@@ -2604,15 +2656,24 @@
       }
 
       elements.permitDialog.close();
+      if (!shouldSubmit) {
+        state.activeView = "permits";
+        state.activeFilter = "draft";
+        render();
+      }
       showToast(
         shouldSubmit
           ? payload.isEmergency
             ? "Emergency permit submitted to Safety Officer."
             : "Permit draft sent to Admin Lane 2 review."
-          : "Permit draft saved.",
+          : "Draft kept. You can edit it from Drafts.",
       );
     } catch (error) {
       showToast(error.error || "Unable to save permit.");
+    } finally {
+      actionButtons.forEach((button) => {
+        button.disabled = false;
+      });
     }
   }
 
@@ -3221,6 +3282,9 @@
     elements.permitForm.addEventListener("submit", (event) => {
       event.preventDefault();
       savePermit(true);
+    });
+    elements.keepDraftButton?.addEventListener("click", () => {
+      savePermit(false);
     });
   }
 

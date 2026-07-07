@@ -90,11 +90,13 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '80mb' }));
 
-const ROLES = ['requester', 'supervisor', 'safety_officer', 'approver', 'admin', 'worker'];
+const ORGANIZATION_ADMIN_ROLE = 'organization_admin';
+const APPLICATION_ROLES = ['requester', 'admin', 'safety_officer', 'supervisor', 'worker'];
+const ROLES = [...APPLICATION_ROLES, 'approver', ORGANIZATION_ADMIN_ROLE];
 const REVIEW_ROLES = new Set(['supervisor', 'safety_officer', 'approver']);
 const PERMIT_CREATORS = new Set(['requester', 'admin']);
-const ADMIN_ASSIGNABLE_ROLES = ROLES.filter((role) => !['worker', 'approver'].includes(role));
-const APPLICATION_ROLE_PRIORITY = ['admin', 'safety_officer', 'supervisor', 'requester'];
+const ADMIN_ASSIGNABLE_ROLES = APPLICATION_ROLES;
+const APPLICATION_ROLE_PRIORITY = ['admin', 'safety_officer', 'supervisor', 'requester', 'worker'];
 const PERMIT_STATUSES = [
   'draft',
   'submitted',
@@ -121,6 +123,7 @@ const STATUS_TRANSITIONS = {
 
 const BCRYPT_ROUNDS = 10;
 const REJECTION_SNAPSHOT_HASH_PREFIX = 'v2:';
+const DEFAULT_TEAM_USER_PASSWORD = '12345678';
 
 function nowIso() {
   return new Date().toISOString();
@@ -186,13 +189,7 @@ function createMailTransport() {
 function buildWorkerInviteMessage({ worker, user, activationLink, activationExpiresAt }) {
   const workerName = normalizeString(worker?.name || user?.fullName || 'Worker');
   const company = normalizeString(worker?.company || user?.organization || 'your company');
-  const expiresAt = activationExpiresAt
-    ? new Date(activationExpiresAt).toLocaleString('en-US', {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-      hour12: true,
-    })
-    : 'the expiry time shown in PTW Guardian';
+  const expiresAt = formatActivationExpiry(activationExpiresAt);
 
   const text = [
     `Hello ${workerName},`,
@@ -216,6 +213,16 @@ function buildWorkerInviteMessage({ worker, user, activationLink, activationExpi
   const sms = `PTW Guardian: your worker profile was approved. Set your password: ${activationLink}`;
 
   return { subject: 'Activate your PTW Guardian worker account', text, html, sms };
+}
+
+function formatActivationExpiry(activationExpiresAt) {
+  return activationExpiresAt
+    ? new Date(activationExpiresAt).toLocaleString('en-US', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      hour12: true,
+    })
+    : 'the expiry time shown in PTW Guardian';
 }
 
 async function sendActivationEmail({ worker, user, activationLink, activationExpiresAt }) {
@@ -617,9 +624,10 @@ function normalizeIdentityName(value) {
   return normalizeString(value).replace(/\s+/g, ' ').toLowerCase();
 }
 
-async function validateWorkerAccountReference({ name, email }) {
+async function validateWorkerAccountReference({ name, email, organizationId }) {
   const normalizedEmail = normalizeEmail(email);
   const normalizedName = normalizeString(name);
+  const normalizedOrganizationId = normalizeString(organizationId);
 
   if (!normalizedEmail) {
     return { error: 'Worker email is required and must match a registered worker account', status: 400 };
@@ -630,8 +638,12 @@ async function validateWorkerAccountReference({ name, email }) {
     return { error: 'Worker account must be registered before a worker profile can be submitted', status: 400 };
   }
 
-  if (account.role !== 'worker') {
+  if (!hasRole(account, 'worker')) {
     return { error: `Email already belongs to a ${account.role} account, not a worker account`, status: 400 };
+  }
+
+  if (normalizedOrganizationId && account.organizationId !== normalizedOrganizationId) {
+    return { error: 'Worker account belongs to a different organization workspace', status: 403 };
   }
 
   if (normalizeIdentityName(account.fullName) !== normalizeIdentityName(normalizedName)) {
@@ -1089,6 +1101,55 @@ async function ensureTableIndex(tableName, indexName, indexDefinition) {
   }
 }
 
+async function backfillOrganizationScopedRecords() {
+  await pool.execute(`
+    UPDATE permits
+    JOIN users ON users.id = permits.requested_by_id
+    SET permits.organization_id = users.organization_id
+    WHERE permits.organization_id IS NULL
+      AND users.organization_id IS NOT NULL
+      AND users.organization_id <> ''
+  `);
+
+  await pool.execute(`
+    UPDATE workers
+    JOIN users creator ON creator.id = workers.created_by
+    SET workers.organization_id = creator.organization_id
+    WHERE workers.organization_id IS NULL
+      AND creator.organization_id IS NOT NULL
+      AND creator.organization_id <> ''
+  `);
+
+  await pool.execute(`
+    UPDATE workers
+    JOIN users worker_user ON LOWER(worker_user.email) = LOWER(workers.email)
+    SET workers.organization_id = worker_user.organization_id
+    WHERE workers.organization_id IS NULL
+      AND worker_user.organization_id IS NOT NULL
+      AND worker_user.organization_id <> ''
+  `);
+}
+
+async function activatePendingOrganizationManagedUsers() {
+  await pool.execute(
+    `
+    UPDATE users
+    SET
+      password_hash = ?,
+      account_status = 'active',
+      activation_token = NULL,
+      activation_expires_at = NULL,
+      activated_at = COALESCE(activated_at, ?),
+      updated_at = ?
+    WHERE organization_id IS NOT NULL
+      AND organization_id <> ''
+      AND account_status = 'pending_activation'
+      AND role <> ?
+  `,
+    [hashPassword(DEFAULT_TEAM_USER_PASSWORD), nowIso(), nowIso(), ORGANIZATION_ADMIN_ROLE],
+  );
+}
+
 async function initializeDatabase() {
   const databaseName = escapeDatabaseName(dbConfig.database);
   const setupConnection = await mysql.createConnection({
@@ -1113,12 +1174,27 @@ async function initializeDatabase() {
   });
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS organizations (
+      id CHAR(36) PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      registration_no VARCHAR(120) NOT NULL UNIQUE,
+      admin_user_id CHAR(36),
+      created_at VARCHAR(40) NOT NULL,
+      updated_at VARCHAR(40) NOT NULL,
+      UNIQUE INDEX idx_organizations_registration_no (registration_no),
+      INDEX idx_organizations_admin_user_id (admin_user_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id CHAR(36) PRIMARY KEY,
       employee_id VARCHAR(20) NOT NULL UNIQUE,
       full_name VARCHAR(255) NOT NULL,
       email VARCHAR(255) NOT NULL UNIQUE,
       organization VARCHAR(255) NOT NULL,
+      organization_id CHAR(36),
+      company_registration_no VARCHAR(120),
       role VARCHAR(50) NOT NULL,
       roles LONGTEXT NULL,
       password_hash VARCHAR(255) NOT NULL,
@@ -1142,6 +1218,12 @@ async function initializeDatabase() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
   `);
 
+  await ensureTableColumn('users', 'organization_id', 'organization_id CHAR(36) NULL AFTER organization');
+  await ensureTableColumn(
+    'users',
+    'company_registration_no',
+    'company_registration_no VARCHAR(120) NULL AFTER organization_id',
+  );
   await ensureTableColumn('users', 'account_status', "account_status VARCHAR(40) NOT NULL DEFAULT 'active' AFTER token");
   await ensureTableColumn('users', 'roles', 'roles LONGTEXT NULL AFTER role');
   await ensureTableColumn('users', 'activation_token', 'activation_token VARCHAR(128) NULL AFTER account_status');
@@ -1163,6 +1245,7 @@ async function initializeDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS permits (
       id CHAR(36) PRIMARY KEY,
+      organization_id CHAR(36),
       requested_by_id CHAR(36) NOT NULL,
       requested_by VARCHAR(255) NOT NULL,
       title VARCHAR(255) NOT NULL,
@@ -1183,6 +1266,7 @@ async function initializeDatabase() {
       status VARCHAR(40) NOT NULL,
       created_at VARCHAR(40) NOT NULL,
       updated_at VARCHAR(40) NOT NULL,
+      INDEX idx_permits_organization_id (organization_id),
       INDEX idx_permits_requested_by_id (requested_by_id),
       INDEX idx_permits_status (status),
       CONSTRAINT fk_permits_requested_by
@@ -1210,6 +1294,12 @@ async function initializeDatabase() {
   }
 
   await ensureTableColumn('permits', 'work_type', 'work_type VARCHAR(100) NULL AFTER title');
+  await ensureTableColumn('permits', 'organization_id', 'organization_id CHAR(36) NULL AFTER id');
+  await ensureTableIndex(
+    'permits',
+    'idx_permits_organization_id',
+    'INDEX idx_permits_organization_id (organization_id)',
+  );
   await ensureTableColumn('permits', 'documents', 'documents LONGTEXT NULL AFTER is_emergency');
   await ensureTableColumn(
     'permits',
@@ -1232,6 +1322,7 @@ async function initializeDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS workers (
       id CHAR(36) PRIMARY KEY,
+      organization_id CHAR(36),
       ic_passport VARCHAR(80),
       employee_id VARCHAR(32) UNIQUE,
       name VARCHAR(255) NOT NULL,
@@ -1254,12 +1345,14 @@ async function initializeDatabase() {
       created_at VARCHAR(40) NOT NULL,
       updated_at VARCHAR(40) NOT NULL,
       UNIQUE INDEX idx_workers_ic_passport (ic_passport),
+      INDEX idx_workers_organization_id (organization_id),
       INDEX idx_workers_created_by (created_by),
       INDEX idx_workers_status (status)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
   `);
 
   await ensureTableColumn('workers', 'ic_passport', 'ic_passport VARCHAR(80) NULL AFTER id');
+  await ensureTableColumn('workers', 'organization_id', 'organization_id CHAR(36) NULL AFTER id');
   await ensureTableColumn('workers', 'employee_id', 'employee_id VARCHAR(32) UNIQUE AFTER id');
   await ensureTableColumn('workers', 'name', 'name VARCHAR(255) NULL AFTER employee_id');
   await ensureTableColumn('workers', 'role', 'role VARCHAR(100) AFTER name');
@@ -1279,6 +1372,14 @@ async function initializeDatabase() {
     'idx_workers_ic_passport',
     'UNIQUE INDEX idx_workers_ic_passport (ic_passport)',
   );
+  await ensureTableIndex(
+    'workers',
+    'idx_workers_organization_id',
+    'INDEX idx_workers_organization_id (organization_id)',
+  );
+
+  await backfillOrganizationScopedRecords();
+  await activatePendingOrganizationManagedUsers();
 
   const migrationTimestamp = nowIso();
   await pool.execute(
@@ -1394,6 +1495,8 @@ function rowToUser(row) {
     fullName: row.full_name,
     email: row.email,
     organization: row.organization,
+    organizationId: row.organization_id || '',
+    companyRegistrationNo: row.company_registration_no || '',
     role: roles[0] || row.role,
     roles,
     accountStatus: row.account_status || 'active',
@@ -1439,6 +1542,12 @@ function hasAnyRole(user, roles = []) {
   return roles.some((role) => hasRole(user, role));
 }
 
+function canAccessOrganizationRecord(user, record) {
+  const organizationId = normalizeString(user?.organizationId);
+  if (!organizationId) return true;
+  return normalizeString(record?.organizationId) === organizationId;
+}
+
 function sortApplicationRoles(roles) {
   return [...roles].sort((a, b) => {
     const aIndex = APPLICATION_ROLE_PRIORITY.indexOf(a);
@@ -1454,6 +1563,7 @@ function rowToPermit(row) {
 
   return {
     id: row.id,
+    organizationId: row.organization_id || '',
     requestedById: row.requested_by_id,
     requestedBy: row.requested_by,
     title: row.title,
@@ -1543,6 +1653,7 @@ function rowToWorker(row, options = {}) {
   if (!row) return null;
   return {
     id: row.id,
+    organizationId: row.organization_id || '',
     icPassport: row.ic_passport,
     employeeId: row.employee_id,
     name: row.name,
@@ -1568,6 +1679,11 @@ function rowToWorker(row, options = {}) {
 }
 
 async function getAllWorkers(connection = pool, options = {}) {
+  const params = [];
+  const organizationId = normalizeString(options.organizationId);
+  const whereClause = organizationId ? 'WHERE workers.organization_id = ?' : '';
+  if (organizationId) params.push(organizationId);
+
   const [rows] = await connection.execute(`
     SELECT
       workers.*,
@@ -1579,10 +1695,11 @@ async function getAllWorkers(connection = pool, options = {}) {
     FROM workers
     LEFT JOIN users ON users.id = workers.created_by
     LEFT JOIN users worker_users
-      ON worker_users.role = 'worker'
+      ON (worker_users.role = 'worker' OR worker_users.roles LIKE '%"worker"%')
       AND LOWER(worker_users.email) = LOWER(workers.email)
+    ${whereClause}
     ORDER BY workers.created_at DESC
-  `);
+  `, params);
   return rows.map((row) => rowToWorker(row, options));
 }
 
@@ -1592,11 +1709,12 @@ async function insertWorker(payload, user, connection = pool) {
   await connection.execute(
     `
     INSERT INTO workers (
-      id, ic_passport, employee_id, name, role, phone, email, company, permits, certifications, expiry, status, review_comment, created_by, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      id, organization_id, ic_passport, employee_id, name, role, phone, email, company, permits, certifications, expiry, status, review_comment, created_by, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
     [
       id,
+      normalizeString(user?.organizationId) || null,
       normalizeString(payload.icPassport) || null,
       payload.employeeId || null,
       normalizeString(payload.name),
@@ -1627,7 +1745,7 @@ async function insertWorker(payload, user, connection = pool) {
     FROM workers
     LEFT JOIN users ON users.id = workers.created_by
     LEFT JOIN users worker_users
-      ON worker_users.role = 'worker'
+      ON (worker_users.role = 'worker' OR worker_users.roles LIKE '%"worker"%')
       AND LOWER(worker_users.email) = LOWER(workers.email)
     WHERE workers.id = ?
     LIMIT 1
@@ -1652,7 +1770,7 @@ async function getWorkerById(id, connection = pool, options = {}) {
     FROM workers
     LEFT JOIN users ON users.id = workers.created_by
     LEFT JOIN users worker_users
-      ON worker_users.role = 'worker'
+      ON (worker_users.role = 'worker' OR worker_users.roles LIKE '%"worker"%')
       AND LOWER(worker_users.email) = LOWER(workers.email)
     WHERE workers.id = ?
     LIMIT 1
@@ -1715,6 +1833,7 @@ async function updateWorkerStatus(id, status, reviewComment = '') {
 async function deactivateLinkedWorkerAccount(worker, connection = pool) {
   const email = normalizeEmail(worker?.email);
   if (!email) return null;
+  const organizationId = normalizeString(worker?.organizationId);
 
   const timestamp = nowIso();
   await connection.execute(
@@ -1724,10 +1843,11 @@ async function deactivateLinkedWorkerAccount(worker, connection = pool) {
       account_status = 'inactive',
       token = NULL,
       updated_at = ?
-    WHERE role = 'worker'
+    WHERE (role = 'worker' OR roles LIKE '%"worker"%')
       AND LOWER(email) = LOWER(?)
+      ${organizationId ? 'AND organization_id = ?' : ''}
   `,
-    [timestamp, email],
+    organizationId ? [timestamp, email, organizationId] : [timestamp, email],
   );
 
   return getUserByEmail(email, connection);
@@ -1763,7 +1883,11 @@ async function workerHasPermitHistory(worker, connection = pool) {
   const references = workerReferenceValues(worker);
   if (!references.size) return false;
 
-  const [rows] = await connection.execute('SELECT assigned_workers FROM permits');
+  const organizationId = normalizeString(worker?.organizationId);
+  const [rows] = await connection.execute(
+    `SELECT assigned_workers FROM permits ${organizationId ? 'WHERE organization_id = ?' : ''}`,
+    organizationId ? [organizationId] : [],
+  );
   return rows.some((row) =>
     normalizeAssignedWorkers(decodeJson(row.assigned_workers)).some((assignedWorker) =>
       references.has(normalizeString(assignedWorker).toLowerCase()),
@@ -1775,6 +1899,7 @@ async function ensureApprovedWorkerAccount(worker) {
   const email = normalizeEmail(worker?.email);
   const employeeId = normalizeString(worker?.employeeId);
   const fullName = normalizeString(worker?.name);
+  const organizationId = normalizeString(worker?.organizationId);
 
   if (!email || !employeeId || !fullName) {
     return {
@@ -1798,6 +1923,14 @@ async function ensureApprovedWorkerAccount(worker) {
       created: false,
       skipped: true,
       reason: `Email already belongs to a ${existing.role} account`,
+    };
+  }
+
+  if (organizationId && existing.organizationId !== organizationId) {
+    return {
+      created: false,
+      skipped: true,
+      reason: 'Worker account belongs to a different organization workspace',
     };
   }
 
@@ -1840,19 +1973,22 @@ function sanitizeUser(user) {
 
 function canViewWorker(user, worker) {
   if (!user || !worker) return false;
+  if (!canAccessOrganizationRecord(user, worker)) return false;
   const status = String(worker.status || '').toLowerCase();
   return isAdmin(user) || ['valid', 'inactive'].includes(status) || worker.createdBy === user.id;
 }
 
-async function assertAssignedWorkersAssignable(assignedWorkers = [], connection = pool) {
+async function assertAssignedWorkersAssignable(assignedWorkers = [], connection = pool, options = {}) {
   const references = normalizeAssignedWorkers(assignedWorkers).map((worker) => normalizeString(worker).toLowerCase());
   if (!references.length) return;
 
+  const organizationId = normalizeString(options.organizationId);
   const [workers] = await connection.execute(`
     SELECT id, employee_id, name, email, status
     FROM workers
     WHERE status = 'inactive'
-  `);
+      ${organizationId ? 'AND organization_id = ?' : ''}
+  `, organizationId ? [organizationId] : []);
 
   const inactiveMatches = workers.filter((worker) =>
     [worker.id, worker.employee_id, worker.name, worker.email]
@@ -1917,22 +2053,24 @@ async function getUserByToken(token) {
 }
 
 async function hasInactiveWorkerProfile(user, connection = pool) {
-  if (user?.role !== 'worker') return false;
+  if (!hasRole(user, 'worker')) return false;
 
   const email = normalizeEmail(user.email);
   const employeeId = normalizeString(user.employeeId).toLowerCase();
+  const organizationId = normalizeString(user.organizationId);
   const [rows] = await connection.execute(
     `
     SELECT id
     FROM workers
     WHERE status = 'inactive'
+      ${organizationId ? 'AND organization_id = ?' : ''}
       AND (
         LOWER(email) = LOWER(?)
         OR LOWER(employee_id) = ?
       )
     LIMIT 1
   `,
-    [email, employeeId],
+    organizationId ? [organizationId, email, employeeId] : [email, employeeId],
   );
 
   return rows.length > 0;
@@ -1956,6 +2094,103 @@ async function getAllUsers(connection = pool) {
   return rows.map(rowToUser);
 }
 
+async function getUsersForAdmin(adminUser, connection = pool) {
+  const organizationId = normalizeString(adminUser?.organizationId);
+  if (!organizationId) {
+    return [];
+  }
+
+  const [rows] = await connection.execute(
+    'SELECT * FROM users WHERE organization_id = ? ORDER BY full_name',
+    [organizationId],
+  );
+  return rows.map(rowToUser);
+}
+
+async function getOrganizationByRegistrationNo(registrationNo, connection = pool) {
+  const normalizedRegistrationNo = normalizeString(registrationNo).toLowerCase();
+  if (!normalizedRegistrationNo) return null;
+
+  const [rows] = await connection.execute(
+    'SELECT * FROM organizations WHERE LOWER(registration_no) = ? LIMIT 1',
+    [normalizedRegistrationNo],
+  );
+  return rows[0] || null;
+}
+
+async function getOrganizationById(id, connection = pool) {
+  const [rows] = await connection.execute('SELECT * FROM organizations WHERE id = ? LIMIT 1', [
+    normalizeString(id),
+  ]);
+  return rows[0] || null;
+}
+
+async function createOrganizationWorkspace({ name, registrationNo, adminUserId }, connection = pool) {
+  const id = createId();
+  const timestamp = nowIso();
+  await connection.execute(
+    `
+    INSERT INTO organizations (
+      id, name, registration_no, admin_user_id, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `,
+    [
+      id,
+      normalizeString(name),
+      normalizeString(registrationNo),
+      normalizeString(adminUserId) || null,
+      timestamp,
+      timestamp,
+    ],
+  );
+
+  const [rows] = await connection.execute('SELECT * FROM organizations WHERE id = ? LIMIT 1', [id]);
+  return rows[0];
+}
+
+async function updateOrganizationWorkspace(adminUser, { name, registrationNo }, connection = pool) {
+  const organizationId = normalizeString(adminUser?.organizationId);
+  const nextName = normalizeString(name);
+  const nextRegistrationNo = normalizeString(registrationNo);
+
+  if (!organizationId || !nextName || !nextRegistrationNo) {
+    const error = new Error('Organization name and registration number are required');
+    error.status = 400;
+    throw error;
+  }
+
+  const existing = await getOrganizationByRegistrationNo(nextRegistrationNo, connection);
+  if (existing && existing.id !== organizationId) {
+    const error = new Error('Company Registration No. / Contractor ID is already registered');
+    error.status = 409;
+    throw error;
+  }
+
+  const timestamp = nowIso();
+  await connection.execute(
+    `
+    UPDATE organizations
+    SET name = ?, registration_no = ?, updated_at = ?
+    WHERE id = ?
+  `,
+    [nextName, nextRegistrationNo, timestamp, organizationId],
+  );
+
+  await connection.execute(
+    `
+    UPDATE users
+    SET organization = ?, company_registration_no = ?, updated_at = ?
+    WHERE organization_id = ?
+  `,
+    [nextName, nextRegistrationNo, timestamp, organizationId],
+  );
+
+  return {
+    organization: await getOrganizationById(organizationId, connection),
+    user: await getUserById(adminUser.id, connection),
+  };
+}
+
 async function updateUserRoles(userId, roles, connection = pool) {
   const existing = await getUserById(userId, connection);
   if (!existing) return null;
@@ -1969,25 +2204,67 @@ async function updateUserRoles(userId, roles, connection = pool) {
   return getUserById(userId, connection);
 }
 
-async function getUsersByRoles(roles, connection = pool) {
+async function updateManagedUserAccess(userId, status, connection = pool) {
+  const normalizedStatus = normalizeString(status).toLowerCase();
+  const timestamp = nowIso();
+  await connection.execute(
+    `
+    UPDATE users
+    SET
+      account_status = ?,
+      token = NULL,
+      activation_token = NULL,
+      activation_expires_at = NULL,
+      activated_at = CASE WHEN ? = 'active' THEN COALESCE(activated_at, ?) ELSE activated_at END,
+      updated_at = ?
+    WHERE id = ?
+  `,
+    [normalizedStatus, normalizedStatus, timestamp, timestamp, userId],
+  );
+  return getUserById(userId, connection);
+}
+
+async function deleteManagedUser(userId, connection = pool) {
+  await connection.execute('DELETE FROM notifications WHERE user_id = ?', [userId]);
+  const [result] = await connection.execute('DELETE FROM users WHERE id = ?', [userId]);
+  return result.affectedRows || 0;
+}
+
+async function getUsersByRoles(roles, connection = pool, options = {}) {
   const roleList = Array.isArray(roles) ? roles.map(normalizeString).filter(Boolean) : [];
   if (!roleList.length) return [];
 
+  const organizationId = normalizeString(options.organizationId);
   const [rows] = await connection.execute(
-    'SELECT * FROM users WHERE account_status = ? ORDER BY full_name',
-    ['active'],
+    `
+    SELECT *
+    FROM users
+    WHERE account_status = ?
+      ${organizationId ? 'AND organization_id = ?' : ''}
+    ORDER BY full_name
+  `,
+    organizationId ? ['active', organizationId] : ['active'],
   );
   return rows.map(rowToUser).filter((user) => hasAnyRole(user, roleList));
 }
 
-async function getUsersByEmployeeIds(employeeIds, connection = pool) {
+async function getUsersByEmployeeIds(employeeIds, connection = pool, options = {}) {
   const ids = normalizeAssignedWorkers(employeeIds);
   if (!ids.length) return [];
 
+  const organizationId = normalizeString(options.organizationId);
   const placeholders = ids.map(() => '?').join(', ');
+  const params = organizationId ? [...ids, organizationId] : ids;
   const [rows] = await connection.execute(
-    `SELECT * FROM users WHERE employee_id IN (${placeholders}) AND account_status = 'active' ORDER BY full_name`,
-    ids,
+    `
+    SELECT *
+    FROM users
+    WHERE employee_id IN (${placeholders})
+      AND account_status = 'active'
+      ${organizationId ? 'AND organization_id = ?' : ''}
+    ORDER BY full_name
+  `,
+    params,
   );
   return rows.map(rowToUser);
 }
@@ -2209,14 +2486,16 @@ async function syncWorkerUserFromProfile(worker, connection = pool) {
   const email = normalizeEmail(worker?.email);
   const employeeId = normalizeString(worker?.employeeId);
   const status = normalizeString(worker?.status).toLowerCase();
+  const organizationId = normalizeString(worker?.organizationId);
   if (!email || !employeeId) return;
 
   await connection.execute(
     `
     UPDATE users
     SET employee_id = ?, updated_at = ?
-    WHERE role = 'worker'
+    WHERE (role = 'worker' OR roles LIKE '%"worker"%')
       AND LOWER(email) = LOWER(?)
+      ${organizationId ? 'AND organization_id = ?' : ''}
       AND employee_id <> ?
       AND NOT EXISTS (
         SELECT 1
@@ -2229,7 +2508,9 @@ async function syncWorkerUserFromProfile(worker, connection = pool) {
         ) AS conflicting_user
       )
   `,
-    [employeeId, nowIso(), email, employeeId, employeeId, email],
+    organizationId
+      ? [employeeId, nowIso(), email, organizationId, employeeId, employeeId, email]
+      : [employeeId, nowIso(), email, employeeId, employeeId, email],
   );
 
   if (status === 'inactive') {
@@ -2243,11 +2524,12 @@ async function syncWorkerUserFromProfile(worker, connection = pool) {
         activation_token = NULL,
         activation_expires_at = NULL,
         updated_at = ?
-      WHERE role = 'worker'
+      WHERE (role = 'worker' OR roles LIKE '%"worker"%')
         AND LOWER(email) = LOWER(?)
+        ${organizationId ? 'AND organization_id = ?' : ''}
         AND account_status <> 'active'
     `,
-      [nowIso(), email],
+      organizationId ? [nowIso(), email, organizationId] : [nowIso(), email],
     );
   }
 }
@@ -2255,7 +2537,7 @@ async function syncWorkerUserFromProfile(worker, connection = pool) {
 async function syncWorkerUsersFromProfiles(connection = pool) {
   const [workers] = await connection.execute(
     `
-    SELECT employee_id AS employeeId, email, status
+    SELECT employee_id AS employeeId, email, status, organization_id AS organizationId
     FROM workers
     WHERE email IS NOT NULL
       AND email <> ''
@@ -2269,25 +2551,32 @@ async function syncWorkerUsersFromProfiles(connection = pool) {
   }
 }
 
-async function insertUser({ employeeId, fullName, email, organization, role, roles, password }, connection = pool) {
+async function insertUser(
+  { employeeId, fullName, email, organization, organizationId, companyRegistrationNo, role, roles, password },
+  connection = pool,
+) {
   const id = createId();
   const timestamp = nowIso();
   let resolvedEmployeeId = employeeId;
   const normalizedRoles = normalizeUserRoles(roles, role);
   const primaryRole = normalizedRoles[0] || role;
+  const normalizedOrganizationId = normalizeString(organizationId);
 
   if (!resolvedEmployeeId && primaryRole === 'worker') {
+    const params = [normalizeEmail(email)];
+    if (normalizedOrganizationId) params.push(normalizedOrganizationId);
     const [matchingWorkers] = await connection.execute(
       `
       SELECT employee_id
       FROM workers
       WHERE LOWER(email) = LOWER(?)
+        ${normalizedOrganizationId ? 'AND organization_id = ?' : ''}
         AND employee_id IS NOT NULL
         AND employee_id <> ''
       ORDER BY created_at DESC
       LIMIT 1
     `,
-      [normalizeEmail(email)],
+      params,
     );
     resolvedEmployeeId = matchingWorkers[0]?.employee_id;
   }
@@ -2306,6 +2595,8 @@ async function insertUser({ employeeId, fullName, email, organization, role, rol
       full_name,
       email,
       organization,
+      organization_id,
+      company_registration_no,
       role,
       roles,
       password_hash,
@@ -2313,7 +2604,7 @@ async function insertUser({ employeeId, fullName, email, organization, role, rol
       created_at,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
   `,
     [
       id,
@@ -2321,6 +2612,8 @@ async function insertUser({ employeeId, fullName, email, organization, role, rol
       normalizeString(fullName),
       normalizeEmail(email),
       normalizeString(organization),
+      normalizedOrganizationId || null,
+      normalizeString(companyRegistrationNo) || null,
       primaryRole,
       encodeJson(normalizedRoles),
       hashPassword(password),
@@ -2331,6 +2624,99 @@ async function insertUser({ employeeId, fullName, email, organization, role, rol
 
   const [rows] = await connection.execute('SELECT * FROM users WHERE id = ? LIMIT 1', [id]);
   return rowToUser(rows[0]);
+}
+
+async function updateManagedUser(userId, { fullName, email, roles }, connection = pool) {
+  const normalizedRoles = sortApplicationRoles(
+    normalizeUserRoles(roles).filter((role) => ADMIN_ASSIGNABLE_ROLES.includes(role)),
+  );
+  const primaryRole = normalizedRoles[0];
+  const timestamp = nowIso();
+
+  await connection.execute(
+    `
+    UPDATE users
+    SET
+      full_name = ?,
+      email = ?,
+      role = ?,
+      roles = ?,
+      updated_at = ?
+    WHERE id = ?
+  `,
+    [
+      normalizeString(fullName),
+      normalizeEmail(email),
+      primaryRole,
+      encodeJson(normalizedRoles),
+      timestamp,
+      userId,
+    ],
+  );
+
+  return getUserById(userId, connection);
+}
+
+async function registerOrganizationWorkspace({ fullName, email, organization, companyRegistrationNo, password }) {
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    if (await getUserByEmail(email, connection)) {
+      await connection.rollback();
+      return { status: 409, error: 'Email already registered' };
+    }
+
+    if (await getOrganizationByRegistrationNo(companyRegistrationNo, connection)) {
+      await connection.rollback();
+      return {
+        status: 409,
+        error: 'Company Registration No. / Contractor ID is already registered',
+      };
+    }
+
+    const organizationRecord = await createOrganizationWorkspace(
+      {
+        name: organization,
+        registrationNo: companyRegistrationNo,
+      },
+      connection,
+    );
+    const user = await insertUser(
+      {
+        fullName,
+        email,
+        organization,
+        organizationId: organizationRecord.id,
+        companyRegistrationNo,
+        role: ORGANIZATION_ADMIN_ROLE,
+        roles: [ORGANIZATION_ADMIN_ROLE],
+        password,
+      },
+      connection,
+    );
+
+    await connection.execute(
+      'UPDATE organizations SET admin_user_id = ?, updated_at = ? WHERE id = ?',
+      [user.id, nowIso(), organizationRecord.id],
+    );
+    await connection.commit();
+
+    return {
+      user,
+      organization: {
+        id: organizationRecord.id,
+        name: normalizeString(organization),
+        registrationNo: normalizeString(companyRegistrationNo),
+      },
+    };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 async function seedDemoUsers() {
@@ -2456,6 +2842,16 @@ async function seedDemoWorkers() {
 async function getPermitById(id) {
   const [rows] = await pool.execute('SELECT * FROM permits WHERE id = ? LIMIT 1', [id]);
   return rowToPermit(rows[0]);
+}
+
+async function getPermitRowsForUser(user, orderBy = 'created_at DESC') {
+  const organizationId = normalizeString(user?.organizationId);
+  const safeOrderBy = orderBy === 'created_at DESC' ? 'created_at DESC' : 'created_at DESC';
+  const [rows] = await pool.execute(
+    `SELECT * FROM permits ${organizationId ? 'WHERE organization_id = ?' : ''} ORDER BY ${safeOrderBy}`,
+    organizationId ? [organizationId] : [],
+  );
+  return rows;
 }
 
 async function backfillRejectedPermitSnapshotHashes() {
@@ -2775,12 +3171,15 @@ async function insertPermit(payload, user) {
 
   try {
     await connection.beginTransaction();
-    await assertAssignedWorkersAssignable(payload.assignedWorkers, connection);
+    await assertAssignedWorkersAssignable(payload.assignedWorkers, connection, {
+      organizationId: user.organizationId,
+    });
 
     await connection.execute(
       `
       INSERT INTO permits (
         id,
+        organization_id,
         requested_by_id,
         requested_by,
         title,
@@ -2800,10 +3199,11 @@ async function insertPermit(payload, user) {
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)
     `,
       [
         id,
+        normalizeString(user.organizationId) || null,
         user.id,
         user.fullName,
         normalizeString(payload.title),
@@ -2860,7 +3260,9 @@ async function updatePermitDetails(permit, payload, user) {
 
   try {
     await connection.beginTransaction();
-    await assertAssignedWorkersAssignable(payload.assignedWorkers, connection);
+    await assertAssignedWorkersAssignable(payload.assignedWorkers, connection, {
+      organizationId: permit.organizationId,
+    });
     const existingDocuments = await getStoredPermitDocuments(permit.id, connection);
     const isRejectedRequesterRevision =
       permit.status === 'rejected' &&
@@ -3031,6 +3433,10 @@ function isAdmin(user) {
   return hasRole(user, 'admin');
 }
 
+function isOrganizationAdmin(user) {
+  return hasRole(user, ORGANIZATION_ADMIN_ROLE);
+}
+
 function isReviewer(user) {
   return hasAnyRole(user, Array.from(REVIEW_ROLES));
 }
@@ -3062,6 +3468,9 @@ function canWorkerAccessPermit(user, permit) {
 }
 
 function canViewPermit(user, permit) {
+  if (!user || !permit) return false;
+  if (!canAccessOrganizationRecord(user, permit)) return false;
+
   if (isEmergencyPermit(permit)) {
     return (
       permit.requestedById === user.id ||
@@ -3078,6 +3487,7 @@ function canCreatePermit(user) {
 }
 
 function canUpdatePermitDetails(user, permit) {
+  if (!canViewPermit(user, permit)) return false;
   return (
     isAdmin(user) ||
     (hasRole(user, 'requester') &&
@@ -3108,9 +3518,10 @@ function workerProfileLinkForRole(role) {
 
 async function notifyPermitCreated(permit, actorUser) {
   const title = permitDisplayTitle(permit);
+  const organizationScope = { organizationId: permit.organizationId };
   const recipients = isEmergencyPermit(permit)
-    ? await getUsersByRoles(['safety_officer'])
-    : await getUsersByRoles(['admin']);
+    ? await getUsersByRoles(['safety_officer'], pool, organizationScope)
+    : await getUsersByRoles(['admin'], pool, organizationScope);
 
   await createNotificationsForUsers(
     recipients,
@@ -3128,26 +3539,31 @@ async function notifyPermitCreated(permit, actorUser) {
 
 async function notifyPermitStatusChanged(permit, previousStatus, actorUser) {
   const title = permitDisplayTitle(permit);
+  const organizationScope = { organizationId: permit.organizationId };
   const requester = permit.requestedById ? await getUserById(permit.requestedById) : null;
-  const assignedWorkers = await getUsersByEmployeeIds(permit.assignedWorkers || []);
+  const assignedWorkers = await getUsersByEmployeeIds(permit.assignedWorkers || [], pool, organizationScope);
   let recipients = [];
   let notificationTitle = 'Permit status updated';
   let message = `${title} changed from ${previousStatus} to ${permit.status}.`;
 
   if (permit.status === 'submitted') {
     recipients = isEmergencyPermit(permit)
-      ? await getUsersByRoles(['safety_officer'])
-      : await getUsersByRoles(['supervisor', 'safety_officer']);
+      ? await getUsersByRoles(['safety_officer'], pool, organizationScope)
+      : await getUsersByRoles(['supervisor', 'safety_officer'], pool, organizationScope);
     notificationTitle = isEmergencyPermit(permit)
       ? 'Emergency permit needs Safety review'
       : 'Permit submitted for review';
     message = `${title} is waiting for ${isEmergencyPermit(permit) ? 'Safety Officer' : 'Supervisor/Safety'} review.`;
   } else if (permit.status === 'stage1_complete') {
-    recipients = await getUsersByRoles(['supervisor', 'safety_officer']);
+    recipients = await getUsersByRoles(['supervisor', 'safety_officer'], pool, organizationScope);
     notificationTitle = 'Permit ready for Permit Approval';
     message = `${title} completed MOS Approval and needs Supervisor/Safety review.`;
   } else if (permit.status === 'approved') {
-    recipients = uniqueUsers([requester, ...assignedWorkers, ...(await getUsersByRoles(['supervisor']))]);
+    recipients = uniqueUsers([
+      requester,
+      ...assignedWorkers,
+      ...(await getUsersByRoles(['supervisor'], pool, organizationScope)),
+    ]);
     notificationTitle = 'Permit approved';
     message = `${title} has been approved and is ready for activation/monitoring.`;
   } else if (permit.status === 'active') {
@@ -3159,7 +3575,7 @@ async function notifyPermitStatusChanged(permit, previousStatus, actorUser) {
     notificationTitle = 'Permit needs revision';
     message = `${title} was returned for revision.`;
   } else if (permit.status === 'resubmitted') {
-    recipients = uniqueUsers([requester, ...(await getUsersByRoles(['admin']))]);
+    recipients = uniqueUsers([requester, ...(await getUsersByRoles(['admin'], pool, organizationScope))]);
     notificationTitle = 'Permit resubmitted';
     message = `${title} was corrected and resubmitted for Admin Lane 2 review.`;
   } else if (permit.status === 'closed') {
@@ -3189,7 +3605,7 @@ async function notifyPermitStatusChanged(permit, previousStatus, actorUser) {
 }
 
 async function notifyWorkerSubmitted(worker, actorUser) {
-  const recipients = await getUsersByRoles(['admin']);
+  const recipients = await getUsersByRoles(['admin'], pool, { organizationId: worker.organizationId });
   await createNotificationsForUsers(
     recipients,
     {
@@ -3683,6 +4099,7 @@ async function resetForTests() {
   await pool.query('DELETE FROM permits');
   await pool.query('DELETE FROM workers');
   await pool.query('DELETE FROM users');
+  await pool.query('DELETE FROM organizations');
   await seedDemoUsers();
 }
 
@@ -3753,6 +4170,10 @@ app.get(['/account', '/account.html'], (req, res) => {
   sendNoCacheFile(res, path.join(__dirname, 'account.html'));
 });
 
+app.get(['/organization', '/organization.html'], (req, res) => {
+  sendNoCacheFile(res, path.join(__dirname, 'organization.html'));
+});
+
 app.get(['/support', '/support.html'], (req, res) => {
   sendNoCacheFile(res, path.join(__dirname, 'support.html'));
 });
@@ -3790,6 +4211,14 @@ app.get('/admin.js', (req, res) => {
   sendNoCacheFile(res, path.join(__dirname, 'admin.js'));
 });
 
+app.get('/organization.css', (req, res) => {
+  sendNoCacheFile(res, path.join(__dirname, 'organization.css'));
+});
+
+app.get('/organization.js', (req, res) => {
+  sendNoCacheFile(res, path.join(__dirname, 'organization.js'));
+});
+
 app.get('/safety.css', (req, res) => {
   sendNoCacheFile(res, path.join(__dirname, 'safety.css'));
 });
@@ -3799,40 +4228,40 @@ app.get('/safety.js', (req, res) => {
 });
 
 app.post('/api/auth/signup', async (req, res) => {
-  const { fullName, email, organization, role, password, acceptTerms } = req.body || {};
+  const { fullName, email, organization, companyRegistrationNo, password, confirmPassword, acceptTerms } = req.body || {};
 
-  if (!fullName || !email || !organization || !role || !password || !acceptTerms) {
-    return res.status(400).json({ error: 'Missing required registration fields' });
-  }
-
-  if (!ROLES.includes(role)) {
-    return res.status(400).json({
-      error: 'Invalid role',
-      allowedRoles: ROLES,
-    });
+  if (!fullName || !email || !organization || !companyRegistrationNo || !password || !acceptTerms) {
+    return res.status(400).json({ error: 'Missing required organization registration fields' });
   }
 
   if (password.length < 8) {
     return res.status(400).json({ error: 'Password must be at least 8 characters' });
   }
 
-  if (await getUserByEmail(email)) {
-    return res.status(409).json({ error: 'Email already registered' });
+  if (confirmPassword && password !== confirmPassword) {
+    return res.status(400).json({ error: 'Passwords do not match' });
   }
 
-  const user = await insertUser({
+  const registration = await registerOrganizationWorkspace({
     fullName,
     email,
     organization,
-    role,
+    companyRegistrationNo,
     password,
   });
+
+  if (registration.error) {
+    return res.status(registration.status || 400).json({ error: registration.error });
+  }
+
   const token = createRandomToken();
-  await updateUserToken(user.id, token);
+  await updateUserToken(registration.user.id, token);
+  const user = await getUserById(registration.user.id);
 
   return res.status(201).json({
     user: sanitizeUser({ ...user, token }),
     token,
+    organization: registration.organization,
   });
 });
 
@@ -3908,15 +4337,15 @@ app.get('/api/auth/me', authenticate, (req, res) => {
 });
 
 app.get('/api/users', authenticate, async (req, res) => {
-  if (!isAdmin(req.user)) {
+  if (!isOrganizationAdmin(req.user)) {
     return res.status(403).json({
-      error: 'Only Admin can manage user roles',
+      error: 'Only Organization Admin can manage organization users',
       yourRole: req.user.role,
     });
   }
 
-  const users = (await getAllUsers())
-    .filter((user) => !hasRole(user, 'worker'))
+  const users = (await getUsersForAdmin(req.user))
+    .filter((user) => !hasRole(user, ORGANIZATION_ADMIN_ROLE))
     .map(sanitizeUser);
 
   res.json({
@@ -3927,10 +4356,55 @@ app.get('/api/users', authenticate, async (req, res) => {
   });
 });
 
-app.patch('/api/users/:id/roles', authenticate, async (req, res) => {
-  if (!isAdmin(req.user)) {
+app.post('/api/users', authenticate, async (req, res) => {
+  if (!isOrganizationAdmin(req.user)) {
     return res.status(403).json({
-      error: 'Only Admin can manage user roles',
+      error: 'Only Organization Admin can create user accounts',
+      yourRole: req.user.role,
+    });
+  }
+
+  const { fullName, email } = req.body || {};
+  const requestedRoles = sortApplicationRoles(
+    normalizeUserRoles(req.body?.roles || req.body?.role)
+      .filter((role) => ADMIN_ASSIGNABLE_ROLES.includes(role)),
+  );
+
+  if (!fullName || !email) {
+    return res.status(400).json({ error: 'Full name and work email are required' });
+  }
+
+  if (!requestedRoles.length) {
+    return res.status(400).json({
+      error: 'Select at least one application role',
+      allowedRoles: ADMIN_ASSIGNABLE_ROLES,
+    });
+  }
+
+  if (await getUserByEmail(email)) {
+    return res.status(409).json({ error: 'Email already registered' });
+  }
+
+  const user = await insertUser({
+    fullName,
+    email,
+    organization: req.user.organization,
+    organizationId: req.user.organizationId,
+    companyRegistrationNo: req.user.companyRegistrationNo,
+    role: requestedRoles[0],
+    roles: requestedRoles,
+    password: DEFAULT_TEAM_USER_PASSWORD,
+  });
+
+  res.status(201).json({
+    user: sanitizeUser(user),
+  });
+});
+
+app.patch('/api/users/:id', authenticate, async (req, res) => {
+  if (!isOrganizationAdmin(req.user)) {
+    return res.status(403).json({
+      error: 'Only Organization Admin can manage organization users',
       yourRole: req.user.role,
     });
   }
@@ -3940,10 +4414,134 @@ app.patch('/api/users/:id/roles', authenticate, async (req, res) => {
     return res.status(404).json({ error: 'User not found' });
   }
 
-  if (hasRole(existing, 'worker')) {
-    return res.status(409).json({
-      error: 'Worker accounts are managed from Worker Review and cannot receive application access roles here',
+  if (req.user.organizationId && existing.organizationId !== req.user.organizationId) {
+    return res.status(403).json({ error: 'You can manage users only within your organization workspace' });
+  }
+
+  if (hasRole(existing, ORGANIZATION_ADMIN_ROLE)) {
+    return res.status(400).json({ error: 'Organization Admin access is managed separately from operational roles' });
+  }
+
+  const fullName = Object.prototype.hasOwnProperty.call(req.body || {}, 'fullName')
+    ? normalizeString(req.body.fullName)
+    : existing.fullName;
+  const email = Object.prototype.hasOwnProperty.call(req.body || {}, 'email')
+    ? normalizeEmail(req.body.email)
+    : existing.email;
+  const requestedRoles = sortApplicationRoles(
+    normalizeUserRoles(req.body?.roles || existing.roles)
+      .filter((role) => ADMIN_ASSIGNABLE_ROLES.includes(role)),
+  );
+
+  if (!fullName || !email) {
+    return res.status(400).json({ error: 'Full name and work email are required' });
+  }
+
+  if (!requestedRoles.length) {
+    return res.status(400).json({
+      error: 'Select at least one application role',
+      allowedRoles: ADMIN_ASSIGNABLE_ROLES,
     });
+  }
+
+  if (email !== existing.email) {
+    const duplicate = await getUserByEmail(email);
+    if (duplicate && duplicate.id !== existing.id) {
+      return res.status(409).json({ error: 'Email already registered' });
+    }
+  }
+
+  const user = await updateManagedUser(existing.id, {
+    fullName,
+    email,
+    roles: requestedRoles,
+  });
+  return res.json({ user: sanitizeUser(user) });
+});
+
+app.patch('/api/users/:id/access', authenticate, async (req, res) => {
+  if (!isOrganizationAdmin(req.user)) {
+    return res.status(403).json({
+      error: 'Only Organization Admin can manage user access',
+      yourRole: req.user.role,
+    });
+  }
+
+  const existing = await getUserById(req.params.id);
+  if (!existing) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  if (req.user.organizationId && existing.organizationId !== req.user.organizationId) {
+    return res.status(403).json({ error: 'You can manage users only within your organization workspace' });
+  }
+
+  if (hasRole(existing, ORGANIZATION_ADMIN_ROLE)) {
+    return res.status(400).json({ error: 'Organization Admin access is managed separately' });
+  }
+
+  const status = normalizeString(req.body?.status).toLowerCase();
+  if (!['active', 'inactive'].includes(status)) {
+    return res.status(400).json({ error: 'Access status must be active or inactive' });
+  }
+
+  const user = await updateManagedUserAccess(existing.id, status);
+  return res.json({ user: sanitizeUser(user) });
+});
+
+app.delete('/api/users/:id', authenticate, async (req, res) => {
+  if (!isOrganizationAdmin(req.user)) {
+    return res.status(403).json({
+      error: 'Only Organization Admin can delete users',
+      yourRole: req.user.role,
+    });
+  }
+
+  const existing = await getUserById(req.params.id);
+  if (!existing) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  if (req.user.organizationId && existing.organizationId !== req.user.organizationId) {
+    return res.status(403).json({ error: 'You can manage users only within your organization workspace' });
+  }
+
+  if (hasRole(existing, ORGANIZATION_ADMIN_ROLE)) {
+    return res.status(400).json({ error: 'Organization Admin cannot be deleted from User Management' });
+  }
+
+  try {
+    await deleteManagedUser(existing.id);
+    return res.json({ status: 'deleted', id: existing.id });
+  } catch (error) {
+    if (error?.code === 'ER_ROW_IS_REFERENCED_2' || error?.errno === 1451) {
+      return res.status(409).json({
+        error: 'This user has workflow history and cannot be deleted. Remove access instead.',
+      });
+    }
+    throw error;
+  }
+});
+
+app.patch('/api/users/:id/roles', authenticate, async (req, res) => {
+  if (!isOrganizationAdmin(req.user)) {
+    return res.status(403).json({
+      error: 'Only Organization Admin can manage user roles',
+      yourRole: req.user.role,
+    });
+  }
+
+  const existing = await getUserById(req.params.id);
+  if (!existing) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  if (req.user.organizationId && existing.organizationId !== req.user.organizationId) {
+    return res.status(403).json({ error: 'You can manage users only within your organization workspace' });
+  }
+
+  if (hasRole(existing, ORGANIZATION_ADMIN_ROLE)) {
+    return res.status(400).json({ error: 'Organization Admin access is managed separately from operational roles' });
   }
 
   const requestedRoles = sortApplicationRoles(
@@ -3955,10 +4553,6 @@ app.patch('/api/users/:id/roles', authenticate, async (req, res) => {
       error: 'Select at least one application role',
       allowedRoles: ADMIN_ASSIGNABLE_ROLES,
     });
-  }
-
-  if (existing.id === req.user.id && !requestedRoles.includes('admin')) {
-    return res.status(400).json({ error: 'You cannot remove your own Admin role' });
   }
 
   const user = await updateUserRoles(existing.id, requestedRoles);
@@ -4020,6 +4614,28 @@ app.patch('/api/account', authenticate, async (req, res) => {
   res.json({ user: sanitizeUser(user) });
 });
 
+app.patch('/api/account/organization', authenticate, async (req, res) => {
+  if (!isOrganizationAdmin(req.user)) {
+    return res.status(403).json({ error: 'Only Organization Admin can update organization information' });
+  }
+
+  try {
+    const result = await updateOrganizationWorkspace(req.user, {
+      name: req.body?.organization,
+      registrationNo: req.body?.companyRegistrationNo,
+    });
+    return res.json({
+      organization: result.organization,
+      user: sanitizeUser(result.user),
+    });
+  } catch (error) {
+    if (error?.status) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    throw error;
+  }
+});
+
 app.post('/api/account/profile-picture', authenticate, async (req, res) => {
   const { fileName, mimeType, attachmentData } = req.body || {};
   const normalizedMimeType = normalizeString(mimeType).toLowerCase();
@@ -4070,24 +4686,31 @@ app.patch('/api/account/password', authenticate, async (req, res) => {
 });
 
 app.get('/api/requester/dashboard', authenticate, requireRequester, async (req, res) => {
+  const organizationId = normalizeString(req.user.organizationId);
   const [rows] = await pool.execute(
-    'SELECT * FROM permits WHERE requested_by_id = ? ORDER BY created_at DESC',
-    [req.user.id],
+    `
+    SELECT *
+    FROM permits
+    WHERE requested_by_id = ?
+      ${organizationId ? 'AND organization_id = ?' : ''}
+    ORDER BY created_at DESC
+  `,
+    organizationId ? [req.user.id, organizationId] : [req.user.id],
   );
-  const permits = rows.map(rowToPermit);
+  const permits = rows.map(rowToPermit).filter((permit) => canViewPermit(req.user, permit));
 
   res.json(buildRequesterDashboard(req.user, permits));
 });
 
 app.get('/api/approver/dashboard', authenticate, requireApprover, async (req, res) => {
-  const [rows] = await pool.execute('SELECT * FROM permits ORDER BY created_at DESC');
+  const rows = await getPermitRowsForUser(req.user);
   const permits = rows.map(rowToPermit).filter((permit) => canViewPermit(req.user, permit));
 
   res.json(buildApproverDashboard(req.user, permits));
 });
 
 app.get('/api/workers', authenticate, async (req, res) => {
-  const allWorkers = await getAllWorkers();
+  const allWorkers = await getAllWorkers(pool, { organizationId: req.user.organizationId });
   const workers = allWorkers.filter((worker) => canViewWorker(req.user, worker));
   res.json({ count: workers.length, workers, data: workers });
 });
@@ -4118,7 +4741,7 @@ app.post('/api/workers', authenticate, async (req, res) => {
     return res.status(400).json({ error: 'IC/Passport number is required' });
   }
 
-  const workerAccount = await validateWorkerAccountReference({ name, email });
+  const workerAccount = await validateWorkerAccountReference({ name, email, organizationId: req.user.organizationId });
   if (workerAccount.error) {
     return res.status(workerAccount.status).json({ error: workerAccount.error });
   }
@@ -4169,6 +4792,9 @@ app.post('/api/workers', authenticate, async (req, res) => {
 app.patch('/api/workers/:id', authenticate, async (req, res) => {
   const noworker = await getWorkerById(req.params.id, pool, { includeAttachmentData: true });
   if (!noworker) return res.status(404).json({ error: 'Worker not found' });
+  if (!canViewWorker(req.user, noworker)) {
+    return res.status(403).json({ error: 'You are not allowed to access this worker profile' });
+  }
   const isOwnerRequester = hasRole(req.user, 'requester') && noworker.createdBy === req.user.id;
   if (!isAdmin(req.user) && !isOwnerRequester) {
     return res.status(403).json({ error: 'Only the requester owner or admin may update this worker profile' });
@@ -4189,7 +4815,11 @@ app.patch('/api/workers/:id', authenticate, async (req, res) => {
     return res.status(400).json({ error: 'IC/Passport number is required' });
   }
 
-  const workerAccount = await validateWorkerAccountReference({ name: nextName, email: nextEmail });
+  const workerAccount = await validateWorkerAccountReference({
+    name: nextName,
+    email: nextEmail,
+    organizationId: req.user.organizationId,
+  });
   if (workerAccount.error) {
     return res.status(workerAccount.status).json({ error: workerAccount.error });
   }
@@ -4250,6 +4880,9 @@ app.patch('/api/workers/:id/status', authenticate, async (req, res) => {
 
   const worker = await getWorkerById(req.params.id);
   if (!worker) return res.status(404).json({ error: 'Worker not found' });
+  if (!canViewWorker(req.user, worker)) {
+    return res.status(403).json({ error: 'You are not allowed to access this worker profile' });
+  }
 
   const status = normalizeString(req.body?.status);
   if (!['valid', 'inactive'].includes(status)) {
@@ -4316,6 +4949,9 @@ app.get('/api/workers/:id/certifications/:certificationId/download', authenticat
 app.delete('/api/workers/:id', authenticate, async (req, res) => {
   const noworker = await getWorkerById(req.params.id);
   if (!noworker) return res.status(404).json({ error: 'Worker not found' });
+  if (!canViewWorker(req.user, noworker)) {
+    return res.status(403).json({ error: 'You are not allowed to access this worker profile' });
+  }
 
   if (!isAdmin(req.user)) {
     return res.status(403).json({ error: 'Only admin may delete worker profiles' });
@@ -4332,7 +4968,7 @@ app.delete('/api/workers/:id', authenticate, async (req, res) => {
 });
 
 app.get('/api/permits', authenticate, async (req, res) => {
-  const [rows] = await pool.execute('SELECT * FROM permits ORDER BY created_at DESC');
+  const rows = await getPermitRowsForUser(req.user);
   const visiblePermits = await Promise.all(
     rows
       .map(rowToPermit)
@@ -4631,10 +5267,11 @@ app.post('/api/permits/:id/hse-review', authenticate, async (req, res) => {
     FROM permits
     WHERE id <> ?
       AND status IN ('approved', 'active')
+      ${req.user.organizationId ? 'AND organization_id = ?' : ''}
   `,
-    [permit.id],
+    req.user.organizationId ? [permit.id, req.user.organizationId] : [permit.id],
   );
-  const workers = await getAllWorkers();
+  const workers = await getAllWorkers(pool, { organizationId: req.user.organizationId });
   const evaluation = buildHseEvaluation({
     permit,
     workers,

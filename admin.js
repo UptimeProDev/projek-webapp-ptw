@@ -17,8 +17,6 @@ document.addEventListener('DOMContentLoaded', () => {
     routingItems: document.querySelector('#routingItems'),
     routingCount: document.querySelector('#routingCount'),
     routingDetail: document.querySelector('#routingDetail'),
-    userRoleList: document.querySelector('#userRoleList'),
-    userRoleCount: document.querySelector('#userRoleCount'),
     auditBody: document.querySelector('#auditBody'),
     auditCount: document.querySelector('#auditCount'),
     refreshButton: document.querySelector('#refreshButton'),
@@ -67,15 +65,12 @@ document.addEventListener('DOMContentLoaded', () => {
     competency: document.querySelector('#manageCompetencySection'),
     draftReview: document.querySelector('#permitQueueSection'),
     routing: document.querySelector('#permitClosureSection'),
-    userRoles: document.querySelector('#userRolesSection'),
     auditTrails: document.querySelector('#auditTrailsSection'),
   };
 
   const state = {
     session: readSession(),
     workers: [],
-    users: [],
-    assignableRoles: [],
     permits: [],
     audits: [],
     notifications: [],
@@ -128,13 +123,6 @@ document.addEventListener('DOMContentLoaded', () => {
     'Chemical Handling',
     'First Aid',
   ];
-
-  const userRoleLabels = {
-    admin: 'Admin',
-    requester: 'Requester',
-    supervisor: 'Supervisor',
-    safety_officer: 'Safety Officer',
-  };
 
   const workerPermitAliases = new Map(
     [
@@ -219,10 +207,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function userHasAnyRole(user, roles) {
     return roles.some((role) => userHasRole(user, role));
-  }
-
-  function roleLabel(role) {
-    return userRoleLabels[role] || String(role || 'User').replace(/_/g, ' ');
   }
 
   function redirectToRoleHome() {
@@ -991,18 +975,15 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function loadData() {
-    const [workerResult, permitResult, notificationResult, userResult] = await Promise.all([
+    const [workerResult, permitResult, notificationResult] = await Promise.all([
       apiRequest('/api/workers'),
       apiRequest('/api/permits'),
       loadNotifications(),
-      apiRequest('/api/users'),
     ]);
 
     state.workers = workerResult.workers || workerResult.data || [];
     state.permits = permitResult.permits || permitResult.data || [];
     state.notifications = notificationResult.notifications || notificationResult.data || [];
-    state.users = userResult.users || userResult.data || [];
-    state.assignableRoles = userResult.assignableRoles || [];
     const storedCompletionRequests = readStoredObject(COMPLETION_STORAGE_KEY);
     state.completionRequests = pruneCompletionRequests(storedCompletionRequests, state.permits);
     if (Object.keys(state.completionRequests).length !== Object.keys(storedCompletionRequests).length) {
@@ -1066,13 +1047,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const titles = {
       competency: 'Worker Profile Review',
       draftReview: 'Review Draft Permits',
-      userRoles: 'User Role Management',
       auditTrails: 'Admin Audit Trail',
     };
     const subtitles = {
       competency: 'Review requester-submitted worker profiles, certifications, and permit authorization records.',
       draftReview: 'Clerically verify draft package completeness and formally submit to pending approval.',
-      userRoles: 'Assign multiple application access roles to non-worker accounts.',
       auditTrails: 'Track Lane 2 administrative actions and final closure history.',
     };
 
@@ -1595,105 +1574,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function renderUserRoles(query = '') {
-    if (!elements.userRoleList) return;
-
-    const roles = state.assignableRoles.length
-      ? state.assignableRoles
-      : ['admin', 'requester', 'supervisor', 'safety_officer'];
-    const lowerQuery = query.trim().toLowerCase();
-    const users = state.users.filter((user) => {
-      const searchable = [
-        user.fullName,
-        user.email,
-        user.employeeId,
-        user.organization,
-        ...getUserRoles(user).map(roleLabel),
-      ].join(' ').toLowerCase();
-      return !lowerQuery || searchable.includes(lowerQuery);
-    });
-
-    if (elements.userRoleCount) {
-      elements.userRoleCount.textContent = `${users.length} user${users.length === 1 ? '' : 's'}`;
-    }
-
-    if (!users.length) {
-      elements.userRoleList.innerHTML = `
-        <div class="empty-state" role="status" aria-live="polite">
-          <strong>No application users found</strong>
-          <p class="muted">Create a non-worker account first, then assign access roles here.</p>
-        </div>
-      `;
-      return;
-    }
-
-    elements.userRoleList.innerHTML = users
-      .map((user) => {
-        const userRoles = getUserRoles(user);
-        const initials = (user.fullName || user.email || 'User')
-          .split(/\s+/)
-          .filter(Boolean)
-          .slice(0, 2)
-          .map((part) => part[0].toUpperCase())
-          .join('') || 'U';
-        const selectedLabels = userRoles.map(roleLabel).join(', ') || 'No role';
-        return `
-          <article class="user-role-card" data-user-id="${escapeHtml(user.id)}">
-            <div class="user-role-person">
-              <div class="admin-worker-avatar">${escapeHtml(initials)}</div>
-              <div>
-                <strong>${escapeHtml(user.fullName || 'Unnamed user')}</strong>
-                <span>${escapeHtml(user.email || user.employeeId || '-')}</span>
-                <small>${escapeHtml(user.organization || 'PTW Guardian')}</small>
-              </div>
-            </div>
-            <div class="user-role-current">
-              <span class="meta-muted">Current access</span>
-              <strong>${escapeHtml(selectedLabels)}</strong>
-            </div>
-            <div class="user-role-options">
-              ${roles.map((role) => `
-                <label class="user-role-option">
-                  <input type="checkbox" data-user-role="${escapeHtml(role)}" ${userRoles.includes(role) ? 'checked' : ''}>
-                  <span>${escapeHtml(roleLabel(role))}</span>
-                </label>
-              `).join('')}
-            </div>
-            <button class="btn small" type="button" data-user-role-save="${escapeHtml(user.id)}">Save Roles</button>
-          </article>
-        `;
-      })
-      .join('');
-  }
-
-  async function saveUserRoles(userId) {
-    const card = elements.userRoleList?.querySelector(`[data-user-id="${CSS.escape(userId)}"]`);
-    if (!card) return;
-
-    const roles = Array.from(card.querySelectorAll('[data-user-role]:checked'))
-      .map((input) => input.dataset.userRole)
-      .filter(Boolean);
-    if (!roles.length) {
-      elements.sectionStatus.textContent = 'Select at least one role for this user.';
-      return;
-    }
-
-    try {
-      const result = await apiRequest(`/api/users/${encodeURIComponent(userId)}/roles`, {
-        method: 'PATCH',
-        body: JSON.stringify({ roles }),
-      });
-      state.users = state.users.map((user) => user.id === userId ? result.user : user);
-      if (result.user?.id === state.session?.user?.id) {
-        writeSessionUser(result.user);
-      }
-      renderUserRoles(elements.searchInput?.value || '');
-      elements.sectionStatus.textContent = `Updated roles for ${result.user?.fullName || 'user'}.`;
-    } catch (error) {
-      elements.sectionStatus.textContent = error.error || 'Unable to update user roles.';
-    }
-  }
-
   function updateKpis() {
     const invalid = state.workers.filter((worker) => String(worker.status || '').toLowerCase() !== 'valid').length;
     const queue = getDraftQueue().length;
@@ -1862,7 +1742,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const query = elements.searchInput?.value || '';
     if (state.activeSection === 'competency') renderCompetency(query);
     if (state.activeSection === 'draftReview') renderQueue(query);
-    if (state.activeSection === 'userRoles') renderUserRoles(query);
     if (state.activeSection === 'auditTrails') renderAudit(query);
   }
 
@@ -1873,9 +1752,23 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.sectionStatus.textContent = 'Admin Lane 2 refreshed.';
   }
 
+  function getRequestedSection() {
+    const validSections = new Set(['competency', 'draftReview', 'auditTrails']);
+    const aliases = {
+      userRoles: '',
+      userManagement: '',
+      users: '',
+    };
+    const rawSection =
+      new URLSearchParams(window.location.search).get('section') ||
+      window.location.hash.replace(/^#/, '');
+    const requested = aliases[rawSection] || rawSection;
+    return validSections.has(requested) ? requested : '';
+  }
+
   function wireEvents() {
     elements.navItems.forEach((item, index) => {
-      item.dataset.section = ['competency', 'draftReview', 'userRoles', 'auditTrails'][index];
+      item.dataset.section = ['competency', 'draftReview', 'auditTrails'][index];
       item.addEventListener('click', () => setActiveSection(item.dataset.section));
     });
 
@@ -1982,11 +1875,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const worker = getWorkerRecord(state.activeReviewWorkerId);
       if (worker) updateWorkerReviewStatus(worker, 'valid');
     });
-    elements.userRoleList?.addEventListener('click', (event) => {
-      const button = event.target.closest('[data-user-role-save]');
-      if (!button) return;
-      saveUserRoles(button.dataset.userRoleSave);
-    });
     elements.newWorkerCertifications?.addEventListener('click', (event) => {
       const removeButton = event.target.closest('[data-cert-remove]');
       if (!removeButton) return;
@@ -2029,9 +1917,9 @@ document.addEventListener('DOMContentLoaded', () => {
     await loadData();
     updateKpis();
     renderCompetency();
-    renderUserRoles();
     renderAudit();
-    setActiveSection(getDraftQueue().length ? 'draftReview' : state.activeSection);
+    const requestedSection = getRequestedSection();
+    setActiveSection(requestedSection || (getDraftQueue().length ? 'draftReview' : state.activeSection));
     if (state.activeSection !== 'draftReview') {
       renderQueueDetail(null);
     }

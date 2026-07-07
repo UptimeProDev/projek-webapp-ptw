@@ -16,19 +16,24 @@ document.addEventListener('DOMContentLoaded', () => {
     addressSummaryLine2: document.querySelector('#addressSummaryLine2'),
     rolePanel: document.querySelector('#rolePanel'),
     roleList: document.querySelector('#roleList'),
+    organizationPanel: document.querySelector('#organizationPanel'),
+    organizationForm: document.querySelector('#organizationForm'),
+    organizationNameInput: document.querySelector('#organizationNameInput'),
+    organizationRegistrationInput: document.querySelector('#organizationRegistrationInput'),
     passwordForm: document.querySelector('#passwordForm'),
     toast: document.querySelector('#toast'),
   };
 
   const roleHome = {
+    organization_admin: '/organization',
     requester: '/dashboard',
     admin: '/admin',
     supervisor: '/review',
-    approver: '/approver',
+    approver: '/review',
     safety_officer: '/safety',
     worker: '/worker',
   };
-  const rolePriority = ['admin', 'safety_officer', 'supervisor', 'requester', 'worker'];
+  const rolePriority = ['organization_admin', 'admin', 'safety_officer', 'supervisor', 'requester', 'worker'];
 
   let session = readSession();
   let toastTimer;
@@ -79,8 +84,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function getPreferredRole(user) {
     const roles = getUserRoles(user);
-    return ['admin', 'safety_officer', 'supervisor', 'requester', 'worker']
+    return ['organization_admin', 'admin', 'safety_officer', 'supervisor', 'requester', 'worker']
       .find((role) => roles.includes(role)) || user?.role;
+  }
+
+  function hasRole(user, role) {
+    return getUserRoles(user).includes(role);
   }
 
   function initials(name) {
@@ -158,6 +167,11 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.addressForm.stateRegion.value = address.stateRegion || '';
     elements.addressForm.postalCode.value = address.postalCode || '';
     elements.addressForm.country.value = address.country || '';
+    elements.organizationPanel.classList.toggle('hidden', !hasRole(resolvedUser, 'organization_admin'));
+    if (hasRole(resolvedUser, 'organization_admin')) {
+      elements.organizationNameInput.value = resolvedUser.organization || '';
+      elements.organizationRegistrationInput.value = resolvedUser.companyRegistrationNo || '';
+    }
     renderAddressSummary(address);
     renderRoles(resolvedUser);
   }
@@ -239,6 +253,20 @@ document.addEventListener('DOMContentLoaded', () => {
     showToast('Address saved.');
   }
 
+  async function saveOrganization(event) {
+    event.preventDefault();
+    const form = new FormData(elements.organizationForm);
+    const result = await apiRequest('/api/account/organization', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        organization: form.get('organization'),
+        companyRegistrationNo: form.get('companyRegistrationNo'),
+      }),
+    });
+    updateStoredUser(result.user);
+    showToast('Organization saved.');
+  }
+
   async function uploadPicture(event) {
     event.preventDefault();
     const file = elements.pictureInput.files?.[0];
@@ -310,6 +338,9 @@ document.addEventListener('DOMContentLoaded', () => {
     renderUser(session.user);
     elements.addressForm.addEventListener('submit', (event) => {
       saveAddress(event).catch((error) => showToast(error.error || 'Could not save address.', 'error'));
+    });
+    elements.organizationForm.addEventListener('submit', (event) => {
+      saveOrganization(event).catch((error) => showToast(error.error || 'Could not save organization.', 'error'));
     });
     elements.pictureForm.addEventListener('submit', (event) => {
       uploadPicture(event).catch((error) => showToast(error.error || 'Could not upload picture.', 'error'));

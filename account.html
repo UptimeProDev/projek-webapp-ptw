@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Account | PTW Guardian</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/account.css?v=3" />
+  <link rel="stylesheet" href="/account.css?v=5" />
 </head>
 <body>
   <main class="account-shell">
@@ -24,103 +24,127 @@
     </header>
 
     <section class="account-grid">
-      <aside class="profile-panel">
-        <div class="profile-picture" id="profilePicture" aria-hidden="true">U</div>
-        <div>
-          <h2 id="profileName">User</h2>
-          <p id="profileMeta">Signed in user</p>
-        </div>
-
-        <form class="upload-form" id="pictureForm">
-          <label class="field">
-            <span>Profile picture</span>
-            <input id="pictureInput" name="picture" type="file" accept="image/png,image/jpeg,image/webp" />
-          </label>
-          <button class="dark-button" type="submit">Upload picture</button>
-          <p class="hint">JPG, PNG, or WebP. Maximum 10 MB.</p>
-        </form>
-      </aside>
-
-      <section class="form-panel">
-        <div class="section-head">
-          <h2>Roles</h2>
-          <p>Open the dashboard you need for this session.</p>
-        </div>
-        <div class="role-panel" id="rolePanel">
-          <div class="role-list" id="roleList"></div>
-        </div>
-      </section>
-
-      <section class="form-panel">
-        <div class="section-head">
-          <h2>Address</h2>
-          <p>Keep your contact address available to PTW administrators.</p>
-        </div>
-        <div class="address-summary hidden" id="addressSummary">
-          <span>Saved address</span>
-          <strong id="addressSummaryLine1"></strong>
-          <p id="addressSummaryLine2"></p>
-        </div>
-        <form id="addressForm" class="form-grid">
-          <label class="field wide">
-            <span>Address line 1</span>
-            <input id="addressLine1" name="line1" autocomplete="address-line1" maxlength="255" />
-          </label>
-          <label class="field wide">
-            <span>Address line 2</span>
-            <input id="addressLine2" name="line2" autocomplete="address-line2" maxlength="255" />
-          </label>
-          <label class="field">
-            <span>City</span>
-            <input id="city" name="city" autocomplete="address-level2" maxlength="120" />
-          </label>
-          <label class="field">
-            <span>State / Region</span>
-            <input id="stateRegion" name="stateRegion" autocomplete="address-level1" maxlength="120" />
-          </label>
-          <label class="field">
-            <span>Postal code</span>
-            <input id="postalCode" name="postalCode" autocomplete="postal-code" maxlength="40" />
-          </label>
-          <label class="field">
-            <span>Country</span>
-            <input id="country" name="country" autocomplete="country-name" maxlength="120" />
-          </label>
-          <div class="form-actions wide">
-            <button class="dark-button" type="submit">Save address</button>
+      <div class="account-column">
+        <aside class="profile-panel">
+          <div class="profile-picture" id="profilePicture" aria-hidden="true">U</div>
+          <div>
+            <h2 id="profileName">User</h2>
+            <p id="profileMeta">Signed in user</p>
           </div>
-        </form>
-      </section>
 
-      <section class="form-panel">
-        <div class="section-head">
-          <h2>Password</h2>
-          <p>Change your account password with your current password.</p>
-        </div>
-        <form id="passwordForm" class="form-grid">
-          <label class="field wide">
-            <span>Current password</span>
-            <input id="currentPassword" name="currentPassword" type="password" autocomplete="current-password" required />
-          </label>
-          <label class="field">
-            <span>New password</span>
-            <input id="newPassword" name="newPassword" type="password" autocomplete="new-password" minlength="8" required />
-          </label>
-          <label class="field">
-            <span>Confirm password</span>
-            <input id="confirmPassword" name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required />
-          </label>
-          <div class="form-actions wide">
-            <button class="dark-button" type="submit">Change password</button>
+          <form class="upload-form" id="pictureForm">
+            <label class="field">
+              <span>Profile picture</span>
+              <input id="pictureInput" name="picture" type="file" accept="image/png,image/jpeg,image/webp" />
+            </label>
+            <button class="dark-button" type="submit">Upload picture</button>
+            <p class="hint">JPG, PNG, or WebP. Maximum 10 MB.</p>
+          </form>
+        </aside>
+
+        <section class="form-panel hidden" id="organizationPanel">
+          <div class="section-head">
+            <h2>Organization Information</h2>
+            <p>Update the company workspace details used across PTW operations.</p>
           </div>
-        </form>
-      </section>
+          <form id="organizationForm" class="form-grid">
+            <label class="field">
+              <span>Organization / Contractor Entity</span>
+              <input id="organizationNameInput" name="organization" maxlength="255" required />
+            </label>
+            <label class="field">
+              <span>Company Registration No. / Contractor ID</span>
+              <input id="organizationRegistrationInput" name="companyRegistrationNo" maxlength="120" required />
+            </label>
+            <div class="form-actions wide">
+              <button class="dark-button" type="submit">Save organization</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="form-panel">
+          <div class="section-head">
+            <h2>Password</h2>
+            <p>Change your account password with your current password.</p>
+          </div>
+          <form id="passwordForm" class="form-grid">
+            <label class="field wide">
+              <span>Current password</span>
+              <input id="currentPassword" name="currentPassword" type="password" autocomplete="current-password" required />
+            </label>
+            <label class="field">
+              <span>New password</span>
+              <input id="newPassword" name="newPassword" type="password" autocomplete="new-password" minlength="8" required />
+            </label>
+            <label class="field">
+              <span>Confirm password</span>
+              <input id="confirmPassword" name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required />
+            </label>
+            <div class="form-actions wide">
+              <button class="dark-button" type="submit">Change password</button>
+            </div>
+          </form>
+        </section>
+      </div>
+
+      <div class="account-column">
+        <section class="form-panel">
+          <div class="section-head">
+            <h2>Roles</h2>
+            <p>Open the dashboard you need for this session.</p>
+          </div>
+          <div class="role-panel" id="rolePanel">
+            <div class="role-list" id="roleList"></div>
+          </div>
+        </section>
+
+        <section class="form-panel">
+          <div class="section-head">
+            <h2>Address</h2>
+            <p>Keep your contact address available to PTW administrators.</p>
+          </div>
+          <div class="address-summary hidden" id="addressSummary">
+            <span>Saved address</span>
+            <strong id="addressSummaryLine1"></strong>
+            <p id="addressSummaryLine2"></p>
+          </div>
+          <form id="addressForm" class="form-grid">
+            <label class="field wide">
+              <span>Address line 1</span>
+              <input id="addressLine1" name="line1" autocomplete="address-line1" maxlength="255" />
+            </label>
+            <label class="field wide">
+              <span>Address line 2</span>
+              <input id="addressLine2" name="line2" autocomplete="address-line2" maxlength="255" />
+            </label>
+            <label class="field">
+              <span>City</span>
+              <input id="city" name="city" autocomplete="address-level2" maxlength="120" />
+            </label>
+            <label class="field">
+              <span>State / Region</span>
+              <input id="stateRegion" name="stateRegion" autocomplete="address-level1" maxlength="120" />
+            </label>
+            <label class="field">
+              <span>Postal code</span>
+              <input id="postalCode" name="postalCode" autocomplete="postal-code" maxlength="40" />
+            </label>
+            <label class="field">
+              <span>Country</span>
+              <input id="country" name="country" autocomplete="country-name" maxlength="120" />
+            </label>
+            <div class="form-actions wide">
+              <button class="dark-button" type="submit">Save address</button>
+            </div>
+          </form>
+        </section>
+      </div>
     </section>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </main>
 
-  <script src="/role-switcher.js?v=3"></script>
-  <script src="/account.js?v=4"></script>
+  <script src="/role-switcher.js?v=4"></script>
+  <script src="/account.js?v=6"></script>
 </body>
 </html>
