@@ -4,7 +4,7 @@ const test = require('node:test');
 const {
   buildHseEvaluation,
   mapHseDecisionToStatus,
-} = require('./hse-officer');
+} = require('../hse-officer');
 
 test('MOS Approval HSE review returns correction when evidence is missing', () => {
   const evaluation = buildHseEvaluation({

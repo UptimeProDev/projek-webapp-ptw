@@ -1,5 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
   const COMPLETION_STORAGE_KEY = 'ptwWorkerCompletionRequests';
+  const WORK_STATE_STORAGE_KEY = 'ptwSupervisorWorkStates';
 
   const elements = {
     searchInput: document.querySelector('#searchInput'),
@@ -57,6 +58,8 @@ document.addEventListener('DOMContentLoaded', () => {
     workerReviewSubtitle: document.querySelector('#workerReviewSubtitle'),
     workerReviewBody: document.querySelector('#workerReviewBody'),
     approveWorkerButton: document.querySelector('#approveWorkerButton'),
+    deactivateWorkerButton: document.querySelector('#deactivateWorkerButton'),
+    deleteWorkerButton: document.querySelector('#deleteWorkerButton'),
     settingsButton: document.querySelector('#settingsButton'),
     supportButton: document.querySelector('#supportButton'),
   };
@@ -173,6 +176,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function persistStoredObject(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
+  }
+
+  function setPermitWorkState(permitId, stateName) {
+    const workStates = readStoredObject(WORK_STATE_STORAGE_KEY);
+    workStates[permitId] = {
+      state: stateName,
+      updatedAt: new Date().toISOString(),
+      by: state.session?.user?.email || '',
+    };
+    persistStoredObject(WORK_STATE_STORAGE_KEY, workStates);
   }
 
   function pruneCompletionRequests(requests, permits) {
@@ -1106,26 +1119,18 @@ document.addEventListener('DOMContentLoaded', () => {
         .map((permit) => `<span class="admin-permit-chip">${escapeHtml(permit)}</span>`)
         .join(' ');
       const certifications = normalizeWorkerCertifications(worker.certifications);
-      const certificationSummary = certifications.length
-        ? certifications
-            .map((certification) => {
-              const expiry = certification.expiryDate ? ` exp ${certification.expiryDate}` : '';
-              return `
-                <div class="admin-cert-card">
-                  <div>
-                    <span class="admin-cert-title">${escapeHtml(certification.type || 'Certification')}${escapeHtml(expiry)}</span>
-                    ${certification.fileName ? `<span class="admin-cert-file">${escapeHtml(certification.fileName)}</span>` : ''}
-                  </div>
-                  ${
-                    certification.hasAttachment && certification.id
-                      ? `<button class="btn small secondary cert-download" type="button" data-worker-cert-download="${escapeHtml(worker.id)}" data-certification-id="${escapeHtml(certification.id)}" data-file-name="${escapeHtml(certification.fileName || 'certificate')}">Download</button>`
-                      : ''
-                  }
-                </div>
-              `;
+      const downloadableCertifications = certifications.filter((certification) => certification.hasAttachment && certification.id);
+      const certificationSummary = downloadableCertifications.length
+        ? downloadableCertifications
+            .map((certification, index) => {
+              const label = downloadableCertifications.length > 1 ? `Download ${index + 1}` : 'Download Certificate';
+              const fileName = certification.fileName || 'certificate';
+              return `<button class="btn small secondary cert-download" type="button" title="${escapeHtml(fileName)}" data-worker-cert-download="${escapeHtml(worker.id)}" data-certification-id="${escapeHtml(certification.id)}" data-file-name="${escapeHtml(fileName)}">${escapeHtml(label)}</button>`;
             })
             .join('')
-        : '';
+        : certifications.length
+          ? '<span class="meta-muted">No downloadable file</span>'
+          : '';
       const initials = String(worker.name || 'W')
         .split(/\s+/)
         .filter(Boolean)
@@ -1170,13 +1175,6 @@ document.addEventListener('DOMContentLoaded', () => {
         <td>${renderWorkerReviewActions(worker)}</td>
       `;
 
-      row.querySelector('[data-worker-status="valid"]')?.addEventListener('click', () =>
-        updateWorkerReviewStatus(worker, 'valid'),
-      );
-      row.querySelector('[data-worker-status="inactive"]')?.addEventListener('click', () =>
-        updateWorkerReviewStatus(worker, 'inactive', 'Deactivated by Admin'),
-      );
-      row.querySelector('[data-worker-delete]')?.addEventListener('click', () => deleteWorker(worker));
       row.querySelector('[data-worker-review]')?.addEventListener('click', () => openWorkerReview(worker));
       row.querySelectorAll('[data-worker-cert-download]').forEach((button) => {
         button.addEventListener('click', () => {
@@ -1196,35 +1194,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderWorkerReviewActions(worker) {
-    const status = String(worker.status || 'submitted').toLowerCase();
-    const deleteButton = '<button class="btn small danger" type="button" data-worker-delete>Delete</button>';
-    if (status === 'submitted') {
-      return `
-        <span class="admin-actions">
-          <button class="btn small secondary" type="button" data-worker-review>Review</button>
-          <button class="btn small" type="button" data-worker-status="valid">Mark Valid</button>
-          <button class="btn small secondary" type="button" data-worker-status="inactive">Deactivate</button>
-          ${deleteButton}
-        </span>
-      `;
-    }
-
-    if (status === 'inactive' || status === 'rejected') {
-      return `
-        <span class="admin-actions">
-          <button class="btn small secondary" type="button" data-worker-review>Review</button>
-          <button class="btn small" type="button" data-worker-status="valid">Reactivate</button>
-          ${deleteButton}
-          <span class="meta-muted">${escapeHtml(worker.reviewComment || 'Inactive')}</span>
-        </span>
-      `;
-    }
-
     return `
       <span class="admin-actions">
         <button class="btn small secondary" type="button" data-worker-review>Review</button>
-        <button class="btn small secondary" type="button" data-worker-status="inactive">Deactivate</button>
-        ${deleteButton}
       </span>
     `;
   }
@@ -1235,7 +1207,14 @@ document.addEventListener('DOMContentLoaded', () => {
     state.activeReviewWorkerId = worker.id;
     elements.workerReviewTitle.textContent = worker.name || 'Worker profile';
     elements.workerReviewSubtitle.textContent = `${worker.employeeId || worker.id || '-'} - ${status}`;
-    elements.approveWorkerButton.disabled = String(worker.status || '').toLowerCase() === 'valid';
+    const normalizedStatus = String(worker.status || '').toLowerCase();
+    const isValid = normalizedStatus === 'valid';
+    const isInactive = normalizedStatus === 'inactive' || normalizedStatus === 'rejected';
+
+    elements.approveWorkerButton.textContent = isValid ? 'Active' : isInactive ? 'Activate' : 'Mark Valid';
+    elements.approveWorkerButton.disabled = isValid;
+    elements.deactivateWorkerButton.disabled = isInactive;
+    elements.deleteWorkerButton.disabled = false;
 
     elements.workerReviewBody.innerHTML = `
       <section class="review-summary">
@@ -1351,6 +1330,50 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function wireReviewStages(root) {
+    const workflow = root.querySelector('[data-review-stages]');
+    if (!workflow) return;
+
+    const steps = Array.from(workflow.querySelectorAll('[data-review-step]'));
+    const panels = Array.from(workflow.querySelectorAll('[data-stage-panel]'));
+    const previousButton = workflow.querySelector('[data-stage-prev]');
+    const nextButton = workflow.querySelector('[data-stage-next]');
+    let activeIndex = 0;
+
+    function setStage(index) {
+      activeIndex = Math.max(0, Math.min(index, panels.length - 1));
+
+      steps.forEach((step, stepIndex) => {
+        const isActive = stepIndex === activeIndex;
+        step.classList.toggle('active', isActive);
+        step.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      });
+
+      panels.forEach((panel, panelIndex) => {
+        panel.classList.toggle('active', panelIndex === activeIndex);
+      });
+
+      if (previousButton) {
+        previousButton.disabled = activeIndex === 0;
+      }
+
+      if (nextButton) {
+        const isLastStage = activeIndex === panels.length - 1;
+        nextButton.disabled = isLastStage;
+        nextButton.textContent = isLastStage ? 'Ready to route' : 'Next stage';
+        nextButton.classList.toggle('secondary', isLastStage);
+      }
+    }
+
+    steps.forEach((step, index) => {
+      step.addEventListener('click', () => setStage(index));
+    });
+
+    previousButton?.addEventListener('click', () => setStage(activeIndex - 1));
+    nextButton?.addEventListener('click', () => setStage(activeIndex + 1));
+    setStage(0);
+  }
+
   function renderQueueDetail(permit, target = elements.queueDetail) {
     if (!permit) {
       target.innerHTML = `
@@ -1374,7 +1397,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const canSubmit = permit.status === 'draft' || permit.status === 'resubmitted' || (permit.status === 'rejected' && !needsRequesterRevision);
     const routeText = formatList(permit.approvers);
     const actionMarkup = canSubmit
-      ? '<button class="btn small" id="submitPermitButton" type="button">Submit to Approval Route</button>'
+      ? '<button class="btn small" id="submitPermitButton" type="button">Submit to Safety Officer Review</button>'
       : needsRequesterRevision
         ? '<span class="badge danger">Awaiting requester correction</span>'
         : '<span class="badge pending">Already routed to pending approval</span>';
@@ -1390,6 +1413,9 @@ document.addEventListener('DOMContentLoaded', () => {
         </section>
       `
       : '';
+    const evidenceMarkup = [renderDigitalEvidence(permit), renderSupportingFiles(permit)]
+      .filter(Boolean)
+      .join('') || '<div class="document-empty">No MOS/JSA digital evidence or supporting files attached.</div>';
 
     target.innerHTML = `
       <div class="detail-card">
@@ -1401,57 +1427,105 @@ document.addEventListener('DOMContentLoaded', () => {
           <span class="badge ${statusBadge(permit.status)}">${formatStatus(permit.status)}</span>
         </div>
 
-        <div class="review-strip">
-          <div>
-            <span>MOS/JSA Forms</span>
-            <strong>${digitalEvidenceCount}/2</strong>
-            <small>digital evidence</small>
-          </div>
-          <div>
-            <span>Workers</span>
-            <strong>${(permit.assignedWorkers || []).length}</strong>
-            <small>assigned</small>
-          </div>
-          <div>
-            <span>Route</span>
-            <strong>${escapeHtml(routeText === '-' ? 'Not set' : routeText)}</strong>
-            <small>normal permit</small>
-          </div>
-        </div>
+        ${renderPermitStatusRoute(permit)}
 
-        <div class="detail-row">
-          <div><strong>Requester</strong><p class="muted">${escapeHtml(permit.requestedBy || '-')}</p></div>
-          <div><strong>Work Type</strong><p class="muted">${escapeHtml(getPermitType(permit))}</p></div>
-        </div>
-        <div class="detail-row">
-          <div><strong>Schedule</strong><p class="muted">${formatDateTime(permit.startDateTime)} to ${formatDateTime(permit.endDateTime)}</p></div>
-          <div><strong>Assigned Workers</strong><p class="muted">${escapeHtml(workers)}</p></div>
-        </div>
-        <div class="detail-row">
-          <div><strong>Permit Type</strong><p class="muted">${escapeHtml(formatList(permit.hazards))}</p></div>
-        </div>
-        ${rejectionMarkup}
-        ${renderDigitalEvidence(permit)}
-        ${renderSupportingFiles(permit)}
-        <section class="review-block">
-          <div class="review-block-head">
-            <h4>Scope and Controls</h4>
+        <div class="admin-review-workflow" data-review-stages>
+          <div class="review-stepper" role="tablist" aria-label="Draft review stages">
+            <button class="review-step active" type="button" role="tab" data-review-step>1. Overview</button>
+            <button class="review-step" type="button" role="tab" data-review-step>2. Evidence</button>
+            <button class="review-step" type="button" role="tab" data-review-step>3. Scope</button>
+            <button class="review-step" type="button" role="tab" data-review-step>4. Route</button>
           </div>
-          <div class="detail-row">
-            <div><strong>Description</strong><p class="muted multiline">${escapeHtml(extractScope(permit.description) || permit.description || '-')}</p></div>
+
+          <section class="admin-review-stage active" data-stage-panel>
+            <div class="review-strip">
+              <div>
+                <span>MOS/JSA Forms</span>
+                <strong>${digitalEvidenceCount}/2</strong>
+                <small>digital evidence</small>
+              </div>
+              <div>
+                <span>Workers</span>
+                <strong>${(permit.assignedWorkers || []).length}</strong>
+                <small>assigned</small>
+              </div>
+              <div>
+                <span>Route</span>
+                <strong>${escapeHtml(routeText === '-' ? 'Not set' : routeText)}</strong>
+                <small>normal permit</small>
+              </div>
+            </div>
+            <div class="stage-card">
+              <h4>Permit Information</h4>
+              <div class="detail-row">
+                <div><strong>Requester</strong><p class="muted">${escapeHtml(permit.requestedBy || '-')}</p></div>
+                <div><strong>Work Type</strong><p class="muted">${escapeHtml(getPermitType(permit))}</p></div>
+              </div>
+              <div class="detail-row">
+                <div><strong>Schedule</strong><p class="muted">${formatDateTime(permit.startDateTime)} to ${formatDateTime(permit.endDateTime)}</p></div>
+                <div><strong>Assigned Workers</strong><p class="muted">${escapeHtml(workers)}</p></div>
+              </div>
+              <div class="detail-row">
+                <div><strong>Permit Type</strong><p class="muted">${escapeHtml(formatList(permit.hazards))}</p></div>
+              </div>
+            </div>
+            ${rejectionMarkup}
+          </section>
+
+          <section class="admin-review-stage" data-stage-panel>
+            ${evidenceMarkup}
+          </section>
+
+          <section class="admin-review-stage" data-stage-panel>
+            <div class="stage-card">
+              <h4>Scope and Controls</h4>
+              <div class="detail-row">
+                <div><strong>Description</strong><p class="muted multiline">${escapeHtml(extractScope(permit.description) || permit.description || '-')}</p></div>
+              </div>
+              <div class="detail-row">
+                <div><strong>Control Measures</strong><p class="muted multiline">${escapeHtml(formatList(permit.controls))}</p></div>
+                <div><strong>PPE</strong><p class="muted multiline">${escapeHtml(formatList(permit.ppe))}</p></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="admin-review-stage" data-stage-panel>
+            <div class="route-submit-card">
+              <h4>Final Route Check</h4>
+              <p class="muted">Confirm the package is complete before sending this permit to Safety Officer review.</p>
+              <div class="review-strip">
+                <div>
+                  <span>Route</span>
+                  <strong>${escapeHtml(routeText === '-' ? 'Safety Officer' : routeText)}</strong>
+                  <small>next approval stage</small>
+                </div>
+                <div>
+                  <span>Status</span>
+                  <strong>${formatStatus(permit.status)}</strong>
+                  <small>current admin lane</small>
+                </div>
+                <div>
+                  <span>Evidence</span>
+                  <strong>${digitalEvidenceCount}/2</strong>
+                  <small>MOS/JSA forms</small>
+                </div>
+              </div>
+              <div class="button-row">
+                ${actionMarkup}
+              </div>
+            </div>
+          </section>
+
+          <div class="review-stage-actions">
+            <button class="btn small secondary" type="button" data-stage-prev>Back</button>
+            <button class="btn small" type="button" data-stage-next>Next stage</button>
           </div>
-          <div class="detail-row">
-            <div><strong>Control Measures</strong><p class="muted multiline">${escapeHtml(formatList(permit.controls))}</p></div>
-            <div><strong>PPE</strong><p class="muted multiline">${escapeHtml(formatList(permit.ppe))}</p></div>
-          </div>
-        </section>
-        <div class="button-row">
-          ${actionMarkup}
         </div>
       </div>
     `;
 
-    document.querySelector('#submitPermitButton')?.addEventListener('click', () => submitPermit(permit));
+    wireReviewStages(target);
+    target.querySelector('#submitPermitButton')?.addEventListener('click', () => submitPermit(permit));
     target.querySelector('[data-mos-jsa-export]')?.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -1463,6 +1537,60 @@ document.addEventListener('DOMContentLoaded', () => {
           elements.sectionStatus.textContent = error.message || 'Unable to export MOS/JSA Excel.';
         });
     });
+  }
+
+  function renderPermitStatusRoute(permit) {
+    const stages = [
+      ['Requester Submit', 'Create permit package'],
+      ['Admin Review', 'Completeness check'],
+      ['Safety Officer', 'MOS / permit approval'],
+      ['Supervisor Final', 'Release work'],
+      ['Worker Active', 'Controlled execution'],
+    ];
+    const { currentIndex, blocked } = getPermitRouteState(permit);
+
+    return `
+      <section class="permit-route" aria-label="Permit status route">
+        <div class="permit-route-head">
+          <div>
+            <span>Permit status route</span>
+            <strong>${escapeHtml(formatStatus(permit.status))}</strong>
+          </div>
+          <small>${escapeHtml(formatPermitRouteId(permit))}</small>
+        </div>
+        <ol class="permit-route-steps">
+          ${stages.map(([label, note], index) => {
+            const classes = [
+              'permit-route-step',
+              index < currentIndex ? 'is-done' : '',
+              index === currentIndex ? (blocked ? 'is-blocked' : 'is-current') : '',
+            ].filter(Boolean).join(' ');
+            return `
+              <li class="${classes}">
+                <i class="permit-route-dot">${index + 1}</i>
+                <span><strong>${escapeHtml(label)}</strong><small>${escapeHtml(note)}</small></span>
+              </li>
+            `;
+          }).join('')}
+        </ol>
+      </section>
+    `;
+  }
+
+  function getPermitRouteState(permit) {
+    const status = String(permit.status || 'draft').toLowerCase();
+    if (status === 'rejected' || status === 'cancelled') return { currentIndex: 1, blocked: true };
+    if (status === 'submitted' || status === 'resubmitted' || status === 'stage1_complete') return { currentIndex: 2, blocked: false };
+    if (status === 'approved') return { currentIndex: 3, blocked: false };
+    if (status === 'active' || status === 'closed') return { currentIndex: 4, blocked: false };
+    return { currentIndex: 1, blocked: false };
+  }
+
+  function formatPermitRouteId(permit) {
+    const raw = String(permit.id || '').trim();
+    if (/^PTW-/i.test(raw)) return raw.toUpperCase();
+    if (/^[0-9a-f-]{20,}$/i.test(raw)) return `PTW-${raw.slice(0, 4).toUpperCase()}`;
+    return raw || 'PTW';
   }
 
   async function submitPermit(permit) {
@@ -1564,6 +1692,7 @@ document.addEventListener('DOMContentLoaded', () => {
         closedBy: state.session?.user?.fullName || 'PTW Admin',
       };
       persistStoredObject(COMPLETION_STORAGE_KEY, state.completionRequests);
+      setPermitWorkState(permit.id, 'closed');
       await loadData();
       addAudit(`Admin closed ${request.permitDisplayId || permit.title} after post inspection checklist`, 'Closed');
       renderAudit(elements.searchInput?.value || '');
@@ -1632,6 +1761,10 @@ document.addEventListener('DOMContentLoaded', () => {
       addAudit(`Deleted worker record ${worker.name}`);
       renderCompetency(elements.searchInput?.value || '');
       updateKpis();
+      if (elements.workerReviewDialog?.open) {
+        elements.workerReviewDialog.close();
+      }
+      elements.sectionStatus.textContent = `Deleted worker record ${worker.name || worker.id}.`;
     } catch (error) {
       elements.sectionStatus.textContent = error.error || 'Unable to delete worker.';
     }
@@ -1874,6 +2007,14 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.approveWorkerButton?.addEventListener('click', () => {
       const worker = getWorkerRecord(state.activeReviewWorkerId);
       if (worker) updateWorkerReviewStatus(worker, 'valid');
+    });
+    elements.deactivateWorkerButton?.addEventListener('click', () => {
+      const worker = getWorkerRecord(state.activeReviewWorkerId);
+      if (worker) updateWorkerReviewStatus(worker, 'inactive', 'Deactivated by Admin');
+    });
+    elements.deleteWorkerButton?.addEventListener('click', () => {
+      const worker = getWorkerRecord(state.activeReviewWorkerId);
+      if (worker) deleteWorker(worker);
     });
     elements.newWorkerCertifications?.addEventListener('click', (event) => {
       const removeButton = event.target.closest('[data-cert-remove]');

@@ -5,11 +5,17 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Admin Lane 2 | PTW Guardian</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/admin.css?v=lane2-11" />
+  <link rel="stylesheet" href="/ptw-flow.css?v=2" />
+  <link rel="stylesheet" href="/admin.css?v=lane2-16" />
   </head>
 <body>
   <div class="app-shell">
-    <aside class="sidebar">
+    <aside class="sidebar" aria-label="Admin navigation">
+      <button class="sidebar-trigger" type="button" aria-label="Open admin navigation">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
       <div class="brand">
         <img class="brand-logo" src="/assets/ptw-guardian-login-v2.png" alt="PTW Guardian" />
       </div>
@@ -21,7 +27,6 @@
       </nav>
 
       <div class="sidebar-footer">
-        <button class="side-small" type="button" onclick="window.location.href='/account'">Account</button>
         <button class="side-small" id="supportButton" type="button">Support</button>
         <button class="side-small" id="adminLogoutButton" type="button">Logout</button>
       </div>
@@ -251,6 +256,8 @@
       <div class="review-decision">
         <div class="button-row">
           <button class="btn small secondary" type="button" data-close-worker-review>Cancel</button>
+          <button class="btn small secondary" type="button" id="deactivateWorkerButton">Deactivate</button>
+          <button class="btn small danger" type="button" id="deleteWorkerButton">Delete</button>
           <button class="btn small" type="button" id="approveWorkerButton">Mark Valid</button>
         </div>
       </div>
@@ -336,6 +343,6 @@
   </dialog>
 
   <script src="/role-switcher.js?v=4"></script>
-  <script src="/admin.js?v=lane2-25"></script>
+  <script src="/admin.js?v=lane2-28"></script>
 </body>
 </html>

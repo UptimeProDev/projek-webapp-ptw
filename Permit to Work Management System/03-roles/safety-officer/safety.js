@@ -1,5 +1,7 @@
 document.addEventListener('DOMContentLoaded', () => {
   const SITE_VALIDATION_STORAGE_KEY = 'ptwSafetySiteValidationChecklists';
+  const WORK_STATE_STORAGE_KEY = 'ptwSupervisorWorkStates';
+  const COMPLETION_STORAGE_KEY = 'ptwWorkerCompletionRequests';
 
   const elements = {
     navItems: Array.from(document.querySelectorAll('.nav-item')),
@@ -44,6 +46,8 @@ document.addEventListener('DOMContentLoaded', () => {
     activeView: 'all',
     selectedPermitId: null,
     siteValidationChecklists: readStoredObject(SITE_VALIDATION_STORAGE_KEY),
+    workStates: readStoredObject(WORK_STATE_STORAGE_KEY),
+    completionRequests: readStoredObject(COMPLETION_STORAGE_KEY),
   };
 
   const digitalDocumentLabels = {
@@ -308,6 +312,8 @@ document.addEventListener('DOMContentLoaded', () => {
       loadNotifications(),
     ]);
     state.permits = (permitResult.permits || permitResult.data || []).map(normalizePermit);
+    state.workStates = readStoredObject(WORK_STATE_STORAGE_KEY);
+    state.completionRequests = readStoredObject(COMPLETION_STORAGE_KEY);
     state.siteValidationChecklists = {
       ...state.siteValidationChecklists,
       ...state.permits.reduce((records, permit) => {
@@ -394,7 +400,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (permit.status === 'submitted') return 'MOS Approval';
     if (permit.status === 'stage1_complete') return 'Permit Approval';
-    if (permit.status === 'approved') return 'Supervisor Final Approval';
+    if (permit.status === 'approved') return 'Sent to Supervisor';
     if (permit.status === 'active') return 'Active Work';
     if (permit.status === 'rejected') return 'Returned to Requester';
     return formatStatus(permit.status);
@@ -430,10 +436,10 @@ document.addEventListener('DOMContentLoaded', () => {
       submitted: 1,
       stage1_complete: 2,
       emergency_approved: 3,
-      approved: 4,
-      active: 5,
-      rejected: 6,
-      closed: 7,
+      approved: 8,
+      active: 9,
+      rejected: 10,
+      closed: 11,
     };
 
     return [...permits].sort((a, b) => {
@@ -491,6 +497,36 @@ document.addEventListener('DOMContentLoaded', () => {
     return 'warn';
   }
 
+  function latestCompletionRequest(permit) {
+    return Object.values(state.completionRequests || {})
+      .filter((request) => request?.permitId === permit.id || request?.permitDisplayId === displayPermitId(permit))
+      .sort((a, b) => new Date(b.closedAt || b.submittedAt || 0) - new Date(a.closedAt || a.submittedAt || 0))[0] || null;
+  }
+
+  function workCondition(permit) {
+    if (permit.status === 'closed') return { key: 'closed', label: 'Closed' };
+
+    const completion = latestCompletionRequest(permit);
+    if (completion) {
+      const status = String(completion.status || 'waiting_admin').toLowerCase();
+      if (status === 'closed') return { key: 'closed', label: 'Closed' };
+      if (!['rejected', 'cancelled', 'returned'].includes(status)) {
+        return { key: 'sent-for-closure', label: 'Sent for Closure' };
+      }
+    }
+
+    const stateName = String(state.workStates?.[permit.id]?.state || '').toLowerCase();
+    if (stateName === 'held') return { key: 'hold', label: 'Hold' };
+    if (stateName === 'stopped') return { key: 'stop', label: 'Stop' };
+    if (stateName === 'resumed') return { key: 'resume', label: 'Resume' };
+    if (stateName === 'final_closure' || stateName === 'sent_for_closure') {
+      return { key: 'sent-for-closure', label: 'Sent for Closure' };
+    }
+    if (stateName === 'closed') return { key: 'closed', label: 'Closed' };
+    if (permit.status === 'active') return { key: 'active', label: 'Active' };
+    return { key: 'not-started', label: 'Not Started' };
+  }
+
   function setView(view) {
     state.activeView = view;
     elements.navItems.forEach((item) => item.classList.toggle('active', item.dataset.view === view));
@@ -523,6 +559,7 @@ document.addEventListener('DOMContentLoaded', () => {
       permit.requestedBy,
       getPermitType(permit),
       getWorkflowStage(permit),
+      workCondition(permit).label,
       formatStatus(permit.status),
       ...permit.hazards,
       ...permit.controls,
@@ -544,8 +581,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (state.activeView === 'all') {
-      renderQueueSection('Emergency Priority', sortLatest(queue.filter((permit) => permit.isEmergency)));
-      renderQueueSection('Latest Permits', sortLatest(queue.filter((permit) => !permit.isEmergency)));
+      renderQueueSection('Emergency Priority', sortLatest(queue.filter((permit) => permit.isEmergency && isOpenSafetyReview(permit))));
+      renderQueueSection('Latest Permits', sortLatest(queue.filter((permit) => !permit.isEmergency && isOpenSafetyReview(permit))));
+      renderQueueSection('Sent to Supervisor', sortLatest(queue.filter(isSentToSupervisor)));
+      renderQueueSection('Completed / Returned', sortLatest(queue.filter((permit) =>
+        !isOpenSafetyReview(permit) && !isSentToSupervisor(permit) && !(permit.isEmergency && ['submitted', 'approved'].includes(permit.status)),
+      )));
     } else {
       sortLatest(queue).forEach((permit) => elements.queueItems.append(createPermitCard(permit)));
     }
@@ -567,6 +608,15 @@ document.addEventListener('DOMContentLoaded', () => {
     section.innerHTML = `<h4>${escapeHtml(title)}</h4>`;
     permits.forEach((permit) => section.append(createPermitCard(permit)));
     elements.queueItems.append(section);
+  }
+
+  function isOpenSafetyReview(permit) {
+    if (permit.isEmergency) return ['submitted', 'approved'].includes(permit.status);
+    return ['submitted', 'stage1_complete'].includes(permit.status);
+  }
+
+  function isSentToSupervisor(permit) {
+    return !permit.isEmergency && permit.status === 'approved';
   }
 
   function sortLatest(permits) {
@@ -604,6 +654,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderPermitDetail(permit) {
     const stage = getWorkflowStage(permit);
+    const condition = workCondition(permit);
+    const initialStageIndex = getInitialSafetyReviewStage(permit);
 
     elements.permitDetail.innerHTML = `
       <div class="detail-head">
@@ -614,50 +666,80 @@ document.addEventListener('DOMContentLoaded', () => {
         <span class="status ${escapeHtml(statusClass(permit))}">${escapeHtml(stage)}</span>
       </div>
 
-      ${renderWorkflow(permit)}
+      <div class="safety-review-flow" data-safety-stages data-initial-stage="${initialStageIndex}">
+        ${renderWorkflow(permit)}
 
-      <section class="detail-section">
-        <h4>Requester Details</h4>
-        <div class="detail-grid">
-          ${infoBlock('Requested By', permit.requestedBy || '-')}
-          ${infoBlock('Work Type', getPermitType(permit))}
-          ${infoBlock('Start', formatDateTime(permit.startDateTime))}
-          ${infoBlock('End', formatDateTime(permit.endDateTime))}
+        <div class="safety-review-stepper" role="tablist" aria-label="Safety approval review stages">
+          <button class="safety-review-step active" type="button" role="tab" data-safety-step>1. Overview</button>
+          <button class="safety-review-step" type="button" role="tab" data-safety-step>2. Evidence</button>
+          <button class="safety-review-step" type="button" role="tab" data-safety-step>3. Risk</button>
+          <button class="safety-review-step" type="button" role="tab" data-safety-step>4. Site</button>
+          <button class="safety-review-step" type="button" role="tab" data-safety-step>5. Decision</button>
         </div>
-      </section>
 
-      <section class="detail-section">
-        <h4>Work Information</h4>
-        <div class="info-block wide">
-          <strong>Description</strong>
-          <p>${escapeHtml(cleanDescription(permit.description) || '-')}</p>
+        <section class="safety-review-stage active" data-safety-stage-panel>
+          <section class="detail-section">
+            <h4>Requester Details</h4>
+            <div class="detail-grid">
+              ${infoBlock('Requested By', permit.requestedBy || '-')}
+              ${infoBlock('Work Type', getPermitType(permit))}
+              ${infoBlock('Start', formatDateTime(permit.startDateTime))}
+              ${infoBlock('End', formatDateTime(permit.endDateTime))}
+              ${statusInfoBlock('Work Condition', condition)}
+            </div>
+          </section>
+
+          <section class="detail-section">
+            <h4>Work Information</h4>
+            <div class="info-block wide">
+              <strong>Description</strong>
+              <p>${escapeHtml(cleanDescription(permit.description) || '-')}</p>
+            </div>
+          </section>
+        </section>
+
+        <section class="safety-review-stage" data-safety-stage-panel>
+          ${renderDigitalEvidence(permit) || renderStageEmpty('No MOS / JSA digital evidence', 'The requester has not submitted structured MOS or JSA form data for this permit.')}
+        </section>
+
+        <section class="safety-review-stage" data-safety-stage-panel>
+          <section class="detail-section">
+            <h4>Risk Evidence</h4>
+            <div class="detail-grid">
+              ${infoBlock('Permit Type', listText(permit.hazards))}
+              ${infoBlock('Controls', listText(permit.controls))}
+              ${infoBlock('PPE', listText(permit.ppe))}
+              ${infoBlock('Approvers / Contacts', listText(permit.approvers))}
+            </div>
+          </section>
+
+          <section class="detail-section">
+            <h4>Documents And Workers</h4>
+            <div class="detail-grid">
+              ${renderDocuments(permit)}
+              ${infoBlock('Assigned Workers', workerText(permit))}
+            </div>
+          </section>
+        </section>
+
+        <section class="safety-review-stage" data-safety-stage-panel>
+          ${needsSiteValidation(permit)
+            ? renderSiteValidation(permit)
+            : renderStageEmpty('Site validation not open yet', 'Complete MOS Approval first. Permit Approval site validation opens in the next Safety Officer stage.')}
+        </section>
+
+        <section class="safety-review-stage" data-safety-stage-panel>
+          ${renderDecisionPanel(permit)}
+        </section>
+
+        <div class="safety-stage-actions">
+          <button class="ghost-button" type="button" data-safety-stage-prev>Back</button>
+          <button class="dark-button" type="button" data-safety-stage-next>Next</button>
         </div>
-      </section>
-
-      ${renderDigitalEvidence(permit)}
-
-      <section class="detail-section">
-        <h4>Risk Evidence</h4>
-        <div class="detail-grid">
-          ${infoBlock('Permit Type', listText(permit.hazards))}
-          ${infoBlock('Controls', listText(permit.controls))}
-          ${infoBlock('PPE', listText(permit.ppe))}
-          ${infoBlock('Approvers / Contacts', listText(permit.approvers))}
-        </div>
-      </section>
-
-      <section class="detail-section">
-        <h4>Documents And Workers</h4>
-        <div class="detail-grid">
-          ${renderDocuments(permit)}
-          ${infoBlock('Assigned Workers', workerText(permit))}
-        </div>
-      </section>
-
-      ${needsSiteValidation(permit) ? renderSiteValidation(permit) : ''}
-
-      ${renderDecisionPanel(permit)}
+      </div>
     `;
+
+    const setReviewStage = wireSafetyReviewStages(elements.permitDetail);
 
     elements.permitDetail.querySelectorAll('[data-download-document]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -678,17 +760,20 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.permitDetail.querySelectorAll('[data-digital-doc-jump]').forEach((button) => {
       button.addEventListener('click', () => {
         const targetType = String(button.dataset.digitalDocJump || '').toUpperCase();
-        const card = Array.from(elements.permitDetail.querySelectorAll('[data-digital-evidence-card]')).find(
-          (item) => String(item.dataset.digitalEvidenceCard || '').toUpperCase() === targetType,
-        );
-        if (!card) {
-          showDecisionMessage('MOS/JSA digital form data is not available for this permit.', true);
-          return;
-        }
+        setReviewStage(1);
+        window.requestAnimationFrame(() => {
+          const card = Array.from(elements.permitDetail.querySelectorAll('[data-digital-evidence-card]')).find(
+            (item) => String(item.dataset.digitalEvidenceCard || '').toUpperCase() === targetType,
+          );
+          if (!card) {
+            showDecisionMessage('MOS/JSA digital form data is not available for this permit.', true);
+            return;
+          }
 
-        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        card.classList.add('is-highlighted');
-        window.setTimeout(() => card.classList.remove('is-highlighted'), 1400);
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          card.classList.add('is-highlighted');
+          window.setTimeout(() => card.classList.remove('is-highlighted'), 1400);
+        });
       });
     });
 
@@ -703,6 +788,66 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.permitDetail.querySelectorAll('[data-action]').forEach((button) => {
       button.addEventListener('click', () => handleDecision(permit, button.dataset.action));
     });
+  }
+
+  function renderStageEmpty(title, message) {
+    return `
+      <section class="stage-empty">
+        <strong>${escapeHtml(title)}</strong>
+        <p>${escapeHtml(message)}</p>
+      </section>
+    `;
+  }
+
+  function getInitialSafetyReviewStage(permit) {
+    if (permit.status === 'stage1_complete') return 3;
+    if (permit.status === 'approved' || permit.status === 'rejected' || permit.status === 'active' || permit.status === 'closed') return 4;
+    return 0;
+  }
+
+  function wireSafetyReviewStages(root) {
+    const workflow = root.querySelector('[data-safety-stages]');
+    if (!workflow) return () => {};
+
+    const steps = Array.from(workflow.querySelectorAll('[data-safety-step]'));
+    const panels = Array.from(workflow.querySelectorAll('[data-safety-stage-panel]'));
+    const previousButton = workflow.querySelector('[data-safety-stage-prev]');
+    const nextButton = workflow.querySelector('[data-safety-stage-next]');
+    let activeIndex = 0;
+
+    function setStage(index) {
+      activeIndex = Math.max(0, Math.min(index, panels.length - 1));
+
+      steps.forEach((step, stepIndex) => {
+        const isActive = stepIndex === activeIndex;
+        step.classList.toggle('active', isActive);
+        step.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        step.setAttribute('tabindex', isActive ? '0' : '-1');
+      });
+
+      panels.forEach((panel, panelIndex) => {
+        panel.classList.toggle('active', panelIndex === activeIndex);
+      });
+
+      if (previousButton) previousButton.disabled = activeIndex === 0;
+
+      if (nextButton) {
+        const isLastStage = activeIndex === panels.length - 1;
+        nextButton.disabled = isLastStage;
+        nextButton.textContent = isLastStage ? 'Final stage' : 'Next';
+        nextButton.classList.toggle('ghost-button', isLastStage);
+        nextButton.classList.toggle('dark-button', !isLastStage);
+      }
+    }
+
+    steps.forEach((step, index) => {
+      step.addEventListener('click', () => setStage(index));
+    });
+    previousButton?.addEventListener('click', () => setStage(activeIndex - 1));
+    nextButton?.addEventListener('click', () => setStage(activeIndex + 1));
+
+    setStage(Number(workflow.dataset.initialStage || 0));
+    return setStage;
   }
 
   function renderWorkflow(permit) {
@@ -761,6 +906,15 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="info-block">
         <strong>${escapeHtml(label)}</strong>
         <p>${escapeHtml(value || '-')}</p>
+      </div>
+    `;
+  }
+
+  function statusInfoBlock(label, condition) {
+    return `
+      <div class="info-block">
+        <strong>${escapeHtml(label)}</strong>
+        <span class="work-condition-pill ${escapeHtml(condition.key)}">${escapeHtml(condition.label)}</span>
       </div>
     `;
   }
@@ -1533,6 +1687,7 @@ document.addEventListener('DOMContentLoaded', () => {
           'approved',
           approvalComment(`Safety Officer approved Permit Approval. ${siteValidationSummary(permit)} Permit submitted to Supervisor for final approval.`, note),
         );
+        state.selectedPermitId = null;
         setView('all');
         return;
       }

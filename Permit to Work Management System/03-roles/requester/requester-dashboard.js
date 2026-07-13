@@ -17,6 +17,8 @@
     offlinePermits: "ptwRequesterOfflinePermits",
     permitCodes: "ptwRequesterPermitCodes",
     workers: "ptwRequesterWorkers",
+    workStates: "ptwSupervisorWorkStates",
+    completionRequests: "ptwWorkerCompletionRequests",
   };
   const DRAFT_PLACEHOLDERS = {
     title: "Untitled permit draft",
@@ -378,6 +380,8 @@
     session: readSession(),
     permits: [],
     notifications: [],
+    workStates: readJsonStorage(STORAGE_KEYS.workStates, {}),
+    completionRequests: readJsonStorage(STORAGE_KEYS.completionRequests, {}),
     permitCodes: readJsonStorage(STORAGE_KEYS.permitCodes, {}),
     workers: readStoredWorkers(),
     editingId: null,
@@ -674,6 +678,7 @@
     };
     state.permits = (permitsResult.permits || permitsResult.data || []).map(normalizePermit);
     state.notifications = notificationResult.notifications || notificationResult.data || [];
+    refreshWorkConditionState();
     syncPermitCodes();
     setProfile(dashboardResult.user);
     // Try to load workers from server; fallback to localStorage if unavailable
@@ -934,10 +939,21 @@
 
   function workerStatusLabel(status) {
     const normalized = String(status || "submitted").toLowerCase();
-    if (normalized === "valid") return "Valid";
+    if (normalized === "valid") return "Active";
+    if (normalized === "active") return "Active";
+    if (normalized === "inactive") return "Inactive";
     if (normalized === "rejected") return "Returned";
     if (normalized === "expired") return "Expired";
+    if (normalized === "submitted") return "Submitted";
+    if (normalized === "pending") return "Pending Review";
     return "Submitted";
+  }
+
+  function workerStatusClass(status) {
+    const normalized = String(status || "submitted").toLowerCase();
+    if (normalized === "valid" || normalized === "active") return "active";
+    if (normalized === "inactive" || normalized === "rejected" || normalized === "expired") return "rejected";
+    return "pending";
   }
 
   function formatAssignedWorkers(workerIds) {
@@ -996,6 +1012,41 @@
 
   function formatStatus(status) {
     return statusLabels[status] || statusLabels[toUiStatus(status)] || "Draft";
+  }
+
+  function refreshWorkConditionState() {
+    state.workStates = readJsonStorage(STORAGE_KEYS.workStates, {});
+    state.completionRequests = readJsonStorage(STORAGE_KEYS.completionRequests, {});
+  }
+
+  function latestCompletionRequest(permit) {
+    return Object.values(state.completionRequests || {})
+      .filter((request) => request?.permitId === permit.id || request?.permitDisplayId === getDisplayPermitId(permit))
+      .sort((a, b) => new Date(b.closedAt || b.submittedAt || 0) - new Date(a.closedAt || a.submittedAt || 0))[0] || null;
+  }
+
+  function workCondition(permit) {
+    if (permit.status === "closed") return { key: "closed", label: "Closed" };
+
+    const completion = latestCompletionRequest(permit);
+    if (completion) {
+      const status = String(completion.status || "waiting_admin").toLowerCase();
+      if (status === "closed") return { key: "closed", label: "Closed" };
+      if (!["rejected", "cancelled", "returned"].includes(status)) {
+        return { key: "sent-for-closure", label: "Sent for Closure" };
+      }
+    }
+
+    const stateName = String(state.workStates?.[permit.id]?.state || "").toLowerCase();
+    if (stateName === "held") return { key: "hold", label: "Hold" };
+    if (stateName === "stopped") return { key: "stop", label: "Stop" };
+    if (stateName === "resumed") return { key: "resume", label: "Resume" };
+    if (stateName === "final_closure" || stateName === "sent_for_closure") {
+      return { key: "sent-for-closure", label: "Sent for Closure" };
+    }
+    if (stateName === "closed") return { key: "closed", label: "Closed" };
+    if (permit.status === "active") return { key: "active", label: "Active" };
+    return { key: "not-started", label: "Not Started" };
   }
 
   function formatDateTime(value) {
@@ -1369,6 +1420,7 @@
         permit.workType,
         permit.location,
         formatStatus(permit.status),
+        workCondition(permit).label,
         permit.isEmergency ? "emergency safety officer" : "normal admin reviewer",
       ]
         .join(" ")
@@ -1380,6 +1432,8 @@
   }
 
   function renderTable() {
+    refreshWorkConditionState();
+
     if (state.activeView === "workers") {
       renderWorkerProfiles();
       return;
@@ -1395,7 +1449,7 @@
     if (!rows.length) {
       elements.tableBody.innerHTML = `
         <tr>
-          <td class="empty-row" colspan="5">No permit requests match the current filters.</td>
+          <td class="empty-row" colspan="6">No permit requests match the current filters.</td>
         </tr>
       `;
       return;
@@ -1448,6 +1502,7 @@
         <th>Work Type</th>
         <th>Location</th>
         <th>Status</th>
+        <th>Work Condition</th>
         <th>Action</th>
       </tr>
     `;
@@ -1455,6 +1510,7 @@
 
   function renderPermitRow(permit) {
     const uiStatus = toUiStatus(permit.status);
+    const condition = workCondition(permit);
     const displayType = permit.isEmergency ? "Emergency Permit" : permit.workType;
     const icon = typeIcons[displayType] || typeIcons["Preventive Maintenance"];
     const displayId = getDisplayPermitId(permit);
@@ -1472,6 +1528,7 @@
         </td>
         <td><span class="location">${escapeHtml(permit.location)}</span></td>
         <td><span class="status-pill ${escapeHtml(uiStatus)}">${escapeHtml(formatStatus(permit.status))}</span></td>
+        <td><span class="status-pill condition-${escapeHtml(condition.key)}">${escapeHtml(condition.label)}</span></td>
         <td><div class="row-actions">${renderRowActions(permit)}</div></td>
       </tr>
     `;
@@ -1533,28 +1590,26 @@
       .map((permit) => `<span class="permit-chip">${escapeHtml(permit)}</span>`)
       .join(" ");
     const certifications = normalizeWorkerCertifications(worker.certifications);
-    const certSummary = certifications.length
-      ? certifications
-          .map((certification) => {
-            const expiry = certification.expiryDate ? ` exp ${certification.expiryDate}` : "";
-            return `
-              <div class="worker-cert-card">
-                <div>
-                  <span class="worker-cert-title">${escapeHtml(`${certification.type || "Certification"}${expiry}`)}</span>
-                  ${certification.fileName ? `<span class="worker-cert-file">${escapeHtml(certification.fileName)}</span>` : ""}
-                </div>
-                ${workerCertificationDownloadButton(worker.systemId || worker.id, certification)}
-              </div>
-            `;
-          })
+    const downloadableCertifications = certifications.filter((certification) => certification.hasAttachment && certification.id);
+    const certSummary = downloadableCertifications.length
+      ? downloadableCertifications
+          .map((certification, index) =>
+            workerCertificationDownloadButton(
+              worker.systemId || worker.id,
+              certification,
+              downloadableCertifications.length > 1 ? `Download ${index + 1}` : "Download Certificate",
+            ),
+          )
           .join("")
-      : "No certifications";
+      : certifications.length
+        ? '<span class="worker-meta">No downloadable file</span>'
+        : "No certifications";
     const status = String(worker.status || "submitted").toLowerCase();
     const returnReason =
-      status === "rejected" && worker.reviewComment
+      (status === "rejected" || status === "inactive") && worker.reviewComment
         ? `
           <span class="worker-return-note">
-            <strong>Return reason</strong>
+            <strong>${status === "inactive" ? "Inactive note" : "Return reason"}</strong>
             ${escapeHtml(worker.reviewComment)}
           </span>
         `
@@ -1589,7 +1644,7 @@
         </td>
         <td><div class="permit-chip-list">${permits || '<span class="worker-meta">No permit types</span>'}</div></td>
         <td>
-          <span class="status-pill ${status === "valid" ? "active" : status === "rejected" ? "rejected" : "pending"}">${escapeHtml(workerStatusLabel(worker.status))}</span>
+          <span class="status-pill ${workerStatusClass(worker.status)}">${escapeHtml(workerStatusLabel(worker.status))}</span>
           ${returnReason}
         </td>
       </tr>
@@ -2851,6 +2906,7 @@
   function detailRows(permit) {
     const displayId = getDisplayPermitId(permit);
     const uiStatus = toUiStatus(permit.status);
+    const condition = workCondition(permit);
     const permitClass = permit.isEmergency ? "Emergency - Safety Officer" : "Normal - Admin";
     const rejectionSection =
       uiStatus === "rejected"
@@ -2875,6 +2931,15 @@
         </div>
         <span class="status-pill ${escapeHtml(uiStatus)}">${escapeHtml(formatStatus(permit.status))}</span>
       </div>
+
+      ${renderPermitStatusRoute(permit)}
+
+      <section class="detail-section">
+        <h4>Work Condition</h4>
+        <div class="detail-grid">
+          ${detailItem("Current Work Condition", `<span class="status-pill condition-${escapeHtml(condition.key)}">${escapeHtml(condition.label)}</span>`, true, true)}
+        </div>
+      </section>
 
       ${rejectionSection}
 
@@ -2916,6 +2981,57 @@
         </div>
       </section>
     `;
+  }
+
+  function renderPermitStatusRoute(permit) {
+    const stages = [
+      ["Requester Submit", "Create permit package"],
+      ["Admin Review", "Completeness check"],
+      ["Safety Officer", "MOS / permit approval"],
+      ["Supervisor Final", "Release work"],
+      ["Worker Active", "Controlled execution"],
+    ];
+    const { currentIndex, blocked } = getPermitRouteState(permit);
+
+    return `
+      <section class="permit-route" aria-label="Permit status route">
+        <div class="permit-route-head">
+          <div>
+            <span>Permit status route</span>
+            <strong>${escapeHtml(formatStatus(permit.status))}</strong>
+          </div>
+          <small>${escapeHtml(getDisplayPermitId(permit))}</small>
+        </div>
+        <ol class="permit-route-steps">
+          ${stages
+            .map(([label, note], index) => {
+              const classes = [
+                "permit-route-step",
+                index < currentIndex ? "is-done" : "",
+                index === currentIndex ? (blocked ? "is-blocked" : "is-current") : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
+              return `
+                <li class="${classes}">
+                  <i class="permit-route-dot">${index + 1}</i>
+                  <span><strong>${escapeHtml(label)}</strong><small>${escapeHtml(note)}</small></span>
+                </li>
+              `;
+            })
+            .join("")}
+        </ol>
+      </section>
+    `;
+  }
+
+  function getPermitRouteState(permit) {
+    const status = String(permit.status || "draft").toLowerCase();
+    if (status === "rejected" || status === "cancelled") return { currentIndex: 1, blocked: true };
+    if (status === "submitted" || status === "resubmitted" || status === "stage1_complete") return { currentIndex: 2, blocked: false };
+    if (status === "approved") return { currentIndex: 3, blocked: false };
+    if (status === "active" || status === "closed") return { currentIndex: 4, blocked: false };
+    return { currentIndex: 1, blocked: false };
   }
 
   function detailItem(label, value, wide = false, isHtml = false) {

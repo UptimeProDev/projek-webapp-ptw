@@ -356,6 +356,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (status === 'approved') return 'Approved to Start';
     if (status === 'active') return 'Active';
     if (status === 'closed') return 'Completed';
+    if (status === 'waiting_admin') return 'Submitted for Final Closure';
     return String(status || '')
       .replace(/_/g, ' ')
       .replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -369,6 +370,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function statusClass(permit) {
+    if (isFinalClosureSubmitted(permit)) return 'final-closure';
     if (permit.status === 'active') return getWorkState(permit);
     if (permit.status === 'approved') return 'approved';
     if (permit.status === 'closed') return 'closed';
@@ -377,10 +379,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function workStatusLabel(permit) {
+    if (isFinalClosureSubmitted(permit)) return 'Submitted for Final Closure';
     if (permit.status !== 'active') return formatStatus(permit.status);
     const workState = getWorkState(permit);
     if (workState === 'held') return 'Hold';
     if (workState === 'stopped') return 'Stop';
+    if (workState === 'final_closure') return 'Submitted for Final Closure';
     if (workState === 'resumed') return 'Resume';
     return 'Active';
   }
@@ -413,6 +417,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function countdownParts(permit) {
+    if (permit.status === 'closed') {
+      return { value: 'CLOSED', label: 'Final closure complete' };
+    }
+
+    if (isFinalClosureSubmitted(permit)) {
+      return { value: 'STOPPED', label: 'Submitted for final closure' };
+    }
+
     const end = new Date(permit.endDateTime);
     if (Number.isNaN(end.getTime())) {
       return { value: '--:--:--', label: 'No end time' };
@@ -435,6 +447,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function isDueWithinOneHour(permit) {
+    if (isFinalClosureSubmitted(permit)) return false;
     const end = new Date(permit.endDateTime);
     if (Number.isNaN(end.getTime())) return false;
     const diff = end.getTime() - Date.now();
@@ -467,9 +480,25 @@ document.addEventListener('DOMContentLoaded', () => {
       .sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0))[0] || null;
   }
 
+  function finalClosureRequest(permit) {
+    if (permit.status === 'closed') return null;
+
+    const request = latestCompletionRequest(permit);
+    if (request) {
+      const status = String(request.status || 'waiting_admin').toLowerCase();
+      if (!['rejected', 'cancelled', 'returned'].includes(status)) return request;
+    }
+    if (getWorkState(permit) === 'final_closure') return { status: 'waiting_admin' };
+    return null;
+  }
+
+  function isFinalClosureSubmitted(permit) {
+    return Boolean(finalClosureRequest(permit));
+  }
+
   function updateCounts() {
     elements.assignedCount.textContent = state.permits.length;
-    elements.activeCount.textContent = state.permits.filter((permit) => permit.status === 'active').length;
+    elements.activeCount.textContent = state.permits.filter((permit) => permit.status === 'active' && !isFinalClosureSubmitted(permit)).length;
     elements.countdownCount.textContent = state.permits.filter(isDueWithinOneHour).length;
     elements.completedCount.textContent = Object.values(state.completionRequests).filter((request) =>
       request?.workerEmail === state.session?.user?.email,
@@ -478,11 +507,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function getQueue(view = state.activeView) {
     if (view === 'active') {
-      return state.permits.filter((permit) => permit.status === 'active');
+      return state.permits.filter((permit) => permit.status === 'active' && !isFinalClosureSubmitted(permit));
     }
 
     if (view === 'extension') {
-      return state.permits.filter((permit) => permit.status === 'active');
+      return state.permits.filter((permit) => permit.status === 'active' && !isFinalClosureSubmitted(permit));
     }
 
     return state.permits.filter((permit) => !['draft', 'cancelled'].includes(permit.status));
@@ -565,6 +594,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     elements.queueItems.innerHTML = '';
     elements.queueCount.textContent = `${queue.length} item${queue.length === 1 ? '' : 's'}`;
+    const selectedIndex = queue.findIndex((permit) => permit.id === state.selectedPermitId);
+    const activeIndex = selectedIndex >= 0 ? selectedIndex : 0;
 
     queue.forEach((permit, index) => {
       const item = document.createElement('button');
@@ -584,7 +615,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       elements.queueItems.append(item);
 
-      if (index === 0) {
+      if (index === activeIndex) {
         item.classList.add('active');
         state.selectedPermitId = permit.id;
         renderSelectedPermit(permit);
@@ -619,6 +650,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const countdown = countdownParts(permit);
     const extension = latestExtensionRequest(permit);
     const completion = latestCompletionRequest(permit);
+    const finalClosure = finalClosureRequest(permit);
+    const permitClosed = permit.status === 'closed';
+    const permitActive = permit.status === 'active' && !finalClosure;
 
     elements.permitDetail.innerHTML = `
       <section class="worker-console">
@@ -629,7 +663,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <h3>Permit Validity</h3>
             <p>${escapeHtml(displayPermitId(permit))} - ${escapeHtml(permit.location || '-')}</p>
           </div>
-          ${permit.status === 'active' ? actionButton('stop', 'Emergency Stop', 'danger compact') : ''}
+          ${permitActive ? actionButton('stop', 'Emergency Stop', 'danger compact') : ''}
         </div>
         <div class="validity-compact">
           <strong class="validity-time" id="countdownValue">${escapeHtml(countdown.value)}</strong>
@@ -642,13 +676,16 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
       </section>
 
+      ${renderPermitStatusRoute(permit)}
+
       <section class="field-actions">
         <h4>Field Operations</h4>
         <div class="button-row">
-          ${actionButton('preview', 'Preview Permit', 'secondary')}
-          ${permit.status === 'active' ? actionButton('extension', 'Request Extension', 'secondary') : ''}
-          ${permit.status === 'active' ? actionButton('complete', 'Work Complete', '') : ''}
+          ${actionButton('preview', 'View / Print Permit', 'secondary')}
+          ${permitActive ? actionButton('extension', 'Request Extension', 'secondary') : ''}
+          ${permitActive ? actionButton('complete', 'Work Complete', '') : ''}
         </div>
+        ${finalClosure ? '<div class="final-closure-note">Work stopped. Submitted to Admin for final closure.</div>' : ''}
       </section>
 
       <section class="protocol-panel">
@@ -677,8 +714,63 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
     `;
 
-    countdownTimer = setInterval(() => updateCountdown(permit), 1000);
+    if (!finalClosure && !permitClosed) {
+      countdownTimer = setInterval(() => updateCountdown(permit), 1000);
+    }
     wireDetailActions(permit);
+  }
+
+  function renderPermitStatusRoute(permit) {
+    const finalStage = permit.status === 'closed'
+      ? ['Closure', 'Final closeout complete']
+      : isFinalClosureSubmitted(permit)
+        ? ['Final Closure', 'Submitted to Admin']
+        : ['Worker Active', 'Controlled execution'];
+    const stages = [
+      ['Requester Submit', 'Create permit package'],
+      ['Admin Review', 'Completeness check'],
+      ['Safety Officer', 'MOS / permit approval'],
+      ['Supervisor Final', 'Release work'],
+      finalStage,
+    ];
+    const { currentIndex, blocked } = getPermitRouteState(permit);
+
+    return `
+      <section class="permit-route" aria-label="Permit status route">
+        <div class="permit-route-head">
+          <div>
+            <span>Permit status route</span>
+            <strong>${escapeHtml(workStatusLabel(permit))}</strong>
+          </div>
+          <small>${escapeHtml(displayPermitId(permit))}</small>
+        </div>
+        <ol class="permit-route-steps">
+          ${stages.map(([label, note], index) => {
+            const classes = [
+              'permit-route-step',
+              index < currentIndex ? 'is-done' : '',
+              index === currentIndex ? (blocked ? 'is-blocked' : 'is-current') : '',
+            ].filter(Boolean).join(' ');
+            return `
+              <li class="${classes}">
+                <i class="permit-route-dot">${index + 1}</i>
+                <span><strong>${escapeHtml(label)}</strong><small>${escapeHtml(note)}</small></span>
+              </li>
+            `;
+          }).join('')}
+        </ol>
+      </section>
+    `;
+  }
+
+  function getPermitRouteState(permit) {
+    const status = String(permit.status || 'draft').toLowerCase();
+    if (status === 'rejected' || status === 'cancelled') return { currentIndex: 1, blocked: true };
+    if (status === 'submitted' || status === 'resubmitted' || status === 'stage1_complete') return { currentIndex: 2, blocked: false };
+    if (status === 'approved') return { currentIndex: 3, blocked: false };
+    if (status === 'closed') return { currentIndex: 5, blocked: false };
+    if (status === 'active') return { currentIndex: 4, blocked: false };
+    return { currentIndex: 1, blocked: false };
   }
 
   function riskNarrative(permit) {
@@ -732,6 +824,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderExtensionForm(permit) {
     clearInterval(countdownTimer);
+    if (isFinalClosureSubmitted(permit)) {
+      elements.statusLine.textContent = `${displayPermitId(permit)} is already submitted for Admin final closure.`;
+      renderPermitDetail(permit);
+      return;
+    }
+
     const latest = latestExtensionRequest(permit);
     elements.permitDetail.innerHTML = `
       <div class="form-page">
@@ -832,6 +930,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderCompletionForm(permit) {
     clearInterval(countdownTimer);
+    if (isFinalClosureSubmitted(permit)) {
+      elements.statusLine.textContent = `${displayPermitId(permit)} is already submitted for Admin final closure.`;
+      renderPermitDetail(permit);
+      return;
+    }
+
     const hot = isHotWork(permit);
     elements.permitDetail.innerHTML = `
       <div class="completion-page">
@@ -950,10 +1054,11 @@ document.addEventListener('DOMContentLoaded', () => {
       submittedAt: new Date().toISOString(),
     };
     persistStoredObject(COMPLETION_STORAGE_KEY, state.completionRequests);
+    setWorkState(permit, 'final_closure', 'Worker completed work and submitted to Admin for final closure');
     addLog(permit, 'Completion submitted', 'Sent to Admin audit trail for final closure.');
-    elements.statusLine.textContent = `${displayPermitId(permit)} completion sent to Admin audit trail.`;
+    elements.statusLine.textContent = `${displayPermitId(permit)} submitted for Admin final closure. Work timer stopped.`;
     updateCounts();
-    renderPermitDetail(permit);
+    renderQueue();
   }
 
   function reportUnsafeCondition(permit) {
@@ -994,63 +1099,322 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function previewPermit(permit) {
-    const previewWindow = window.open('', '_blank', 'noopener,width=900,height=700');
+    const previewWindow = window.open('', '_blank', 'width=960,height=760');
     if (!previewWindow) {
       elements.statusLine.textContent = 'Popup blocked. Allow popups to preview permit.';
       return;
     }
 
-    previewWindow.document.write(`
+    const generatedAt = new Date().toLocaleString([], {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const workerName = state.session?.user?.fullName || state.session?.user?.email || 'Assigned worker';
+    const permitCopyHtml = `
       <!doctype html>
-      <html>
+      <html lang="en">
       <head>
-        <title>${escapeHtml(displayPermitId(permit))} Permit Preview</title>
+        <meta charset="utf-8">
+        <title>${escapeHtml(displayPermitId(permit))} Worker Permit Copy</title>
         <style>
-          body { margin: 0; background: #f4f6f8; color: #111820; font-family: Arial, sans-serif; }
-          .page { max-width: 920px; margin: 28px auto; padding: 28px; background: #fff; border: 1px solid #cfd7df; }
-          .head { display: flex; justify-content: space-between; gap: 18px; border-bottom: 2px solid #111820; padding-bottom: 16px; }
-          h1 { margin: 0 0 8px; font-size: 28px; }
-          .sub { color: #5d6570; }
-          .badge { display: inline-block; padding: 6px 10px; border: 1px solid #111820; border-radius: 999px; font-weight: 700; text-transform: uppercase; }
-          .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 20px; }
-          .box { border: 1px solid #cfd7df; padding: 12px; border-radius: 6px; background: #fbfcfd; }
-          .box strong { display: block; margin-bottom: 6px; text-transform: uppercase; font-size: 12px; color: #30404a; }
-          pre { margin: 0; white-space: pre-wrap; font-family: inherit; line-height: 1.45; }
-          .actions { margin-top: 22px; display: flex; justify-content: flex-end; }
-          button { min-height: 40px; padding: 8px 16px; border: 0; border-radius: 6px; background: #111820; color: #fff; font-weight: 800; cursor: pointer; }
-          @media print { body { background: #fff; } .page { margin: 0; border: 0; } .actions { display: none; } }
+          * { box-sizing: border-box; }
+          body {
+            margin: 0;
+            background: #edf2f5;
+            color: #111820;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+          }
+          .toolbar {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            padding: 14px 20px;
+            background: rgba(237, 242, 245, 0.94);
+            border-bottom: 1px solid #d4dde3;
+          }
+          button {
+            min-height: 42px;
+            padding: 8px 16px;
+            border: 1px solid #111820;
+            border-radius: 6px;
+            background: #111820;
+            color: #fff;
+            font-weight: 800;
+            cursor: pointer;
+          }
+          button.secondary {
+            background: #fff;
+            color: #111820;
+          }
+          .page {
+            width: min(960px, calc(100vw - 32px));
+            margin: 22px auto 32px;
+            padding: 28px;
+            background: #fff;
+            border: 1px solid #cfd7df;
+            box-shadow: 0 16px 38px rgba(16, 24, 32, 0.12);
+          }
+          .head {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 18px;
+            align-items: start;
+            padding-bottom: 18px;
+            border-bottom: 3px solid #111820;
+          }
+          .brand {
+            font-size: 12px;
+            font-weight: 900;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: #52616d;
+          }
+          h1 {
+            margin: 8px 0 6px;
+            font-size: 28px;
+            line-height: 1.15;
+          }
+          .sub {
+            margin: 0;
+            color: #5d6570;
+            line-height: 1.45;
+          }
+          .permit-id {
+            display: grid;
+            gap: 8px;
+            justify-items: end;
+            text-align: right;
+          }
+          .badge {
+            display: inline-block;
+            padding: 8px 12px;
+            border: 1px solid #111820;
+            border-radius: 999px;
+            font-weight: 900;
+            text-transform: uppercase;
+          }
+          .copy-type {
+            color: #0b6fb3;
+            font-weight: 900;
+            text-transform: uppercase;
+          }
+          .section {
+            margin-top: 20px;
+          }
+          .section h2 {
+            margin: 0 0 10px;
+            font-size: 16px;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+          }
+          .grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+          }
+          .box {
+            min-height: 74px;
+            padding: 12px;
+            border: 1px solid #cfd7df;
+            border-radius: 6px;
+            background: #fbfcfd;
+          }
+          .box.wide {
+            grid-column: 1 / -1;
+          }
+          .box strong {
+            display: block;
+            margin-bottom: 6px;
+            color: #30404a;
+            font-size: 11px;
+            font-weight: 900;
+            letter-spacing: .04em;
+            text-transform: uppercase;
+          }
+          pre {
+            margin: 0;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            font-family: inherit;
+            line-height: 1.45;
+          }
+          .notice {
+            margin-top: 18px;
+            padding: 12px 14px;
+            border: 1px solid #f1d18b;
+            border-radius: 6px;
+            background: #fff8e8;
+            color: #5d3b00;
+            font-weight: 700;
+            line-height: 1.45;
+          }
+          .signatures {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 20px;
+          }
+          .signature {
+            min-height: 92px;
+            display: grid;
+            align-content: end;
+            padding: 12px;
+            border: 1px solid #cfd7df;
+            border-radius: 6px;
+          }
+          .signature span {
+            display: block;
+            padding-top: 12px;
+            border-top: 1px solid #111820;
+            color: #30404a;
+            font-size: 12px;
+            font-weight: 900;
+            text-transform: uppercase;
+          }
+          .footer {
+            margin-top: 18px;
+            padding-top: 12px;
+            border-top: 1px solid #d7dfe5;
+            color: #66737d;
+            font-size: 12px;
+            line-height: 1.45;
+          }
+          @page {
+            size: A4;
+            margin: 12mm;
+          }
+          @media print {
+            body { background: #fff; }
+            .toolbar { display: none; }
+            .page {
+              width: 100%;
+              margin: 0;
+              padding: 0;
+              border: 0;
+              box-shadow: none;
+            }
+            .box {
+              break-inside: avoid;
+            }
+          }
+          @media (max-width: 720px) {
+            .head,
+            .grid,
+            .signatures {
+              grid-template-columns: 1fr;
+            }
+            .permit-id {
+              justify-items: start;
+              text-align: left;
+            }
+          }
         </style>
       </head>
       <body>
+        <div class="toolbar">
+          <button class="secondary" type="button" onclick="window.close()">Close</button>
+          <button type="button" onclick="window.print()">Print / Save as PDF</button>
+        </div>
         <main class="page">
-        <div class="head">
-          <div>
-            <h1>${escapeHtml(permit.title || getPermitType(permit))}</h1>
-            <div class="sub">${escapeHtml(getPermitType(permit))} at ${escapeHtml(permit.location || '-')}</div>
+          <header class="head">
+            <div>
+              <div class="brand">PTW Guardian</div>
+              <h1>Permit To Work - Worker Copy</h1>
+              <p class="sub">${escapeHtml(permit.title || getPermitType(permit))}</p>
+              <p class="sub">${escapeHtml(getPermitType(permit))} at ${escapeHtml(permit.location || '-')}</p>
+            </div>
+            <div class="permit-id">
+              <span class="badge">${escapeHtml(displayPermitId(permit))}</span>
+              <span class="copy-type">${escapeHtml(workStatusLabel(permit))}</span>
+              <span>Generated: ${escapeHtml(generatedAt)}</span>
+            </div>
+          </header>
+
+          <section class="section">
+            <h2>Permit Details</h2>
+            <div class="grid">
+              ${printBox('Permit ID', displayPermitId(permit))}
+              ${printBox('Current Status', workStatusLabel(permit))}
+              ${printBox('Work Type', getPermitType(permit))}
+              ${printBox('Work Site / Location', permit.location || '-')}
+              ${printBox('Start Date & Time', formatDateTime(permit.startDateTime))}
+              ${printBox('End Date & Time', formatDateTime(permit.endDateTime))}
+              ${printBox('Authorized By', 'Supervisor')}
+              ${printBox('Worker Viewing Copy', workerName)}
+            </div>
+          </section>
+
+          <section class="section">
+            <h2>Work Scope</h2>
+            <div class="grid">
+              ${printBox('Scope / Description', extractScope(permit.description) || permit.description || '-', true)}
+              ${printBox('Assigned Workers', formatPrintList(permit.assignedWorkers), true)}
+            </div>
+          </section>
+
+          <section class="section">
+            <h2>Safety Requirements</h2>
+            <div class="grid">
+              ${printBox('Hazards', formatPrintList(permit.hazards))}
+              ${printBox('Control Measures', formatPrintList(permit.controls))}
+              ${printBox('Required PPE', formatPrintList(permit.ppe))}
+              ${printBox('Supporting Documents', formatPermitDocuments(permit))}
+            </div>
+          </section>
+
+          <div class="notice">
+            Worker must keep this permit copy available at the work site and follow the approved controls, PPE, and permit validity window.
           </div>
-          <span class="badge">${escapeHtml(displayPermitId(permit))} - ${escapeHtml(workStatusLabel(permit))}</span>
-        </div>
-        <div class="grid">
-          ${printBox('Permit Type', getPermitType(permit))}
-          ${printBox('Location', permit.location || '-')}
-          ${printBox('Validity', `${formatDateTime(permit.startDateTime)} to ${formatDateTime(permit.endDateTime)}`)}
-          ${printBox('Assigned Workers', (permit.assignedWorkers || []).join(', ') || '-')}
-          ${printBox('Hazards', (permit.hazards || []).join(', ') || '-')}
-          ${printBox('Controls', (permit.controls || []).join('\n') || '-')}
-          ${printBox('PPE', (permit.ppe || []).join(', ') || '-')}
-          ${printBox('Work Scope', extractScope(permit.description) || permit.description || '-')}
-        </div>
-        <div class="actions"><button type="button" onclick="window.print()">Print Permit</button></div>
+
+          <section class="signatures" aria-label="Permit acknowledgements">
+            ${printSignature('Worker acknowledgement')}
+            ${printSignature('Supervisor verification')}
+            ${printSignature('Close-out sign off')}
+          </section>
+
+          <footer class="footer">
+            Use the Print / Save as PDF button and choose "Save as PDF" in the browser print destination when a digital copy is needed.
+          </footer>
         </main>
       </body>
       </html>
-    `);
+    `;
+
+    previewWindow.document.open();
+    previewWindow.document.write(permitCopyHtml);
     previewWindow.document.close();
-    addLog(permit, 'Permit preview opened', 'Displayed permit preview at work site.');
+    previewWindow.focus();
+    addLog(permit, 'Permit copy opened', 'Displayed printable worker permit copy.');
+    elements.statusLine.textContent = `${displayPermitId(permit)} worker permit copy opened.`;
   }
 
-  function printBox(label, value) {
-    return `<div class="box"><strong>${escapeHtml(label)}</strong><pre>${escapeHtml(value)}</pre></div>`;
+  function printBox(label, value, wide = false) {
+    return `<div class="box ${wide ? 'wide' : ''}"><strong>${escapeHtml(label)}</strong><pre>${escapeHtml(value || '-')}</pre></div>`;
+  }
+
+  function formatPrintList(items) {
+    const values = Array.isArray(items) ? items.map((item) => String(item || '').trim()).filter(Boolean) : [];
+    return values.length ? values.map((item) => `- ${item}`).join('\n') : '-';
+  }
+
+  function formatPermitDocuments(permit) {
+    const documents = Array.isArray(permit.documents) ? permit.documents : [];
+    const values = documents
+      .map((document) => document.fileName || document.name || document.type || document.id)
+      .map((value) => String(value || '').trim())
+      .filter(Boolean);
+    return values.length ? values.map((item) => `- ${item}`).join('\n') : '-';
+  }
+
+  function printSignature(label) {
+    return `<div class="signature"><span>${escapeHtml(label)}</span></div>`;
   }
 
   function addLog(permit, action, note) {

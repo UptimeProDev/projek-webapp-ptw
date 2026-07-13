@@ -5,7 +5,7 @@ const ExcelJS = require("exceljs");
 process.env.NODE_ENV = "test";
 process.env.DB_NAME = process.env.DB_NAME || "ptw_test";
 
-const app = require("./server");
+const app = require("../../../server");
 
 let dbAvailable = true;
 let dbError;

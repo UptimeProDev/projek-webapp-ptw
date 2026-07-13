@@ -1,0 +1,226 @@
+.permit-route {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  margin: 0 0 16px;
+  padding: 14px;
+  border: 1px solid #d9e2e7;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgba(16, 24, 32, 0.08);
+}
+
+.permit-route::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-120%);
+  background: linear-gradient(90deg, transparent, rgba(31, 111, 235, 0.08), transparent);
+  animation: permit-route-sweep 5.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.permit-route-head,
+.permit-route-steps {
+  position: relative;
+  z-index: 1;
+}
+
+.permit-route-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.permit-route-head div {
+  min-width: 0;
+}
+
+.permit-route-head span,
+.permit-route-step small {
+  color: #64727c;
+  font-weight: 800;
+}
+
+.permit-route-head span {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.permit-route-head strong {
+  display: block;
+  margin-top: 3px;
+  color: #101820;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.permit-route-head small {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #eef4f8;
+  color: #0b4778;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.permit-route-steps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.permit-route-step {
+  position: relative;
+  min-width: 0;
+  min-height: 66px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #d9e2e7;
+  border-radius: 8px;
+  background: #fbfdfe;
+}
+
+.permit-route-step::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -8px;
+  width: 8px;
+  height: 2px;
+  transform: translateY(-50%);
+  background: #d9e2e7;
+}
+
+.permit-route-step:last-child::after {
+  display: none;
+}
+
+.permit-route-dot {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #b9c5ce;
+  color: #ffffff;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 950;
+}
+
+.permit-route-step strong,
+.permit-route-step small {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.permit-route-step strong {
+  color: #101820;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.permit-route-step small {
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.permit-route-step.is-done {
+  border-color: #b8e7cd;
+  background: #effaf4;
+}
+
+.permit-route-step.is-done::after {
+  background: #087443;
+}
+
+.permit-route-step.is-done .permit-route-dot {
+  background: #087443;
+}
+
+.permit-route-step.is-current {
+  border-color: #f1c27a;
+  background: #fff8ed;
+}
+
+.permit-route-step.is-current::after {
+  background: linear-gradient(90deg, #b86b00, #d9e2e7);
+}
+
+.permit-route-step.is-current .permit-route-dot {
+  background: #b86b00;
+  animation: permit-route-pulse 1.8s ease-in-out infinite;
+}
+
+.permit-route-step.is-blocked {
+  border-color: #f0b4b4;
+  background: #fff2f2;
+}
+
+.permit-route-step.is-blocked::after {
+  background: #c71010;
+}
+
+.permit-route-step.is-blocked .permit-route-dot {
+  background: #c71010;
+}
+
+@keyframes permit-route-sweep {
+  0%, 58% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes permit-route-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(184, 107, 0, 0.34);
+  }
+  50% {
+    box-shadow: 0 0 0 7px rgba(184, 107, 0, 0);
+  }
+}
+
+@media (max-width: 900px) {
+  .permit-route-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .permit-route-step::after {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .permit-route-head {
+    display: grid;
+  }
+
+  .permit-route-head small {
+    justify-self: start;
+  }
+
+  .permit-route-steps {
+    grid-template-columns: 1fr;
+  }
+}

@@ -8,13 +8,19 @@ const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 const ExcelJS = require('exceljs');
+const PROJECT_SOURCE_DIR = path.join(__dirname, 'Permit to Work Management System');
+const BACKEND_SOURCE_DIR = path.join(PROJECT_SOURCE_DIR, '01-backend');
+const AUTH_SOURCE_DIR = path.join(PROJECT_SOURCE_DIR, '02-authentication');
+const ROLE_SOURCE_DIR = path.join(PROJECT_SOURCE_DIR, '03-roles');
+const SHARED_SOURCE_DIR = path.join(PROJECT_SOURCE_DIR, '04-shared');
+const ASSET_SOURCE_DIR = path.join(PROJECT_SOURCE_DIR, '05-assets');
 const {
   buildHseEvaluation,
   extractPermitType,
   mapHseDecisionToStatus,
   normalizeAssignedWorkers,
   normalizePermitDocuments,
-} = require('./hse-officer');
+} = require(path.join(BACKEND_SOURCE_DIR, 'hse-officer'));
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -4091,6 +4097,24 @@ function sendNoCacheFile(res, filePath) {
   res.sendFile(filePath);
 }
 
+function authFile(section, fileName) {
+  return path.join(AUTH_SOURCE_DIR, section, fileName);
+}
+
+function roleFile(role, fileName) {
+  return path.join(ROLE_SOURCE_DIR, role, fileName);
+}
+
+function sharedFile(section, fileName) {
+  return path.join(SHARED_SOURCE_DIR, section, fileName);
+}
+
+function registerNoCacheFileRoute(route, filePath) {
+  app.get(route, (req, res) => {
+    sendNoCacheFile(res, filePath);
+  });
+}
+
 async function resetForTests() {
   await ready;
   await pool.query('DELETE FROM notifications');
@@ -4109,31 +4133,33 @@ async function closeDb() {
   }
 }
 
-app.use('/assets', express.static(path.join(__dirname, 'assets')));
+app.use('/assets', express.static(path.join(ASSET_SOURCE_DIR, 'assets')));
 
-app.get('/style.css', (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'style.css'));
-});
-
-app.get('/app.js', (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'app.js'));
-});
-
-app.get('/dashboard.css', (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'dashboard.css'));
-});
-
-app.get('/dashboard.js', (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'dashboard.js'));
-});
-
-app.get('/supervisor.css', (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'supervisor.css'));
-});
-
-app.get('/supervisor.js', (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'supervisor.js'));
-});
+[
+  ['/style.css', authFile('sign-in-sign-up', 'style.css')],
+  ['/app.js', authFile('sign-in-sign-up', 'app.js')],
+  ['/activate.css', authFile('activation', 'activate.css')],
+  ['/activate.js', authFile('activation', 'activate.js')],
+  ['/dashboard.css', roleFile('requester', 'dashboard.css')],
+  ['/dashboard.js', roleFile('requester', 'dashboard.js')],
+  ['/requester-dashboard.js', roleFile('requester', 'requester-dashboard.js')],
+  ['/admin.css', roleFile('admin', 'admin.css')],
+  ['/admin.js', roleFile('admin', 'admin.js')],
+  ['/organization.css', roleFile('organization-admin', 'organization.css')],
+  ['/organization.js', roleFile('organization-admin', 'organization.js')],
+  ['/safety.css', roleFile('safety-officer', 'safety.css')],
+  ['/safety.js', roleFile('safety-officer', 'safety.js')],
+  ['/supervisor.css', roleFile('supervisor', 'supervisor.css')],
+  ['/supervisor.js', roleFile('supervisor', 'supervisor.js')],
+  ['/worker.css', roleFile('worker', 'worker.css')],
+  ['/worker.js', roleFile('worker', 'worker.js')],
+  ['/account.css', sharedFile('account', 'account.css')],
+  ['/account.js', sharedFile('account', 'account.js')],
+  ['/support.css', sharedFile('support', 'support.css')],
+  ['/support.js', sharedFile('support', 'support.js')],
+  ['/role-switcher.js', sharedFile('scripts', 'role-switcher.js')],
+  ['/ptw-flow.css', sharedFile('styles', 'ptw-flow.css')],
+].forEach(([route, filePath]) => registerNoCacheFileRoute(route, filePath));
 
 app.use(ensureReady);
 
@@ -4154,36 +4180,36 @@ app.get('/api/meta', (req, res) => {
   });
 });
 
-app.get(['/', '/login', '/signup'], (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'index.html'));
+app.get(['/', '/index.html', '/login', '/login.html', '/signup', '/signup.html'], (req, res) => {
+  sendNoCacheFile(res, authFile('sign-in-sign-up', 'index.html'));
 });
 
 app.get(['/activate', '/activate.html'], (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'activate.html'));
+  sendNoCacheFile(res, authFile('activation', 'activate.html'));
 });
 
-app.get('/dashboard', (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'dashboard.html'));
+app.get(['/dashboard', '/dashboard.html'], (req, res) => {
+  sendNoCacheFile(res, roleFile('requester', 'dashboard.html'));
 });
 
 app.get(['/account', '/account.html'], (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'account.html'));
+  sendNoCacheFile(res, sharedFile('account', 'account.html'));
 });
 
 app.get(['/organization', '/organization.html'], (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'organization.html'));
+  sendNoCacheFile(res, roleFile('organization-admin', 'organization.html'));
 });
 
 app.get(['/support', '/support.html'], (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'support.html'));
+  sendNoCacheFile(res, sharedFile('support', 'support.html'));
 });
 
 app.get(['/admin', '/admin.html'], (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'admin.html'));
+  sendNoCacheFile(res, roleFile('admin', 'admin.html'));
 });
 
 app.get(['/safety', '/safety.html'], (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'safety.html'));
+  sendNoCacheFile(res, roleFile('safety-officer', 'safety.html'));
 });
 
 app.get(['/approver', '/approver.html'], (req, res) => {
@@ -4191,41 +4217,17 @@ app.get(['/approver', '/approver.html'], (req, res) => {
 });
 
 app.get(['/review', '/review.html', '/supervisor', '/supervisor.html'], (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'supervisor.html'));
+  sendNoCacheFile(res, roleFile('supervisor', 'supervisor.html'));
 });
 
 app.get(['/worker', '/worker.html'], (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'worker.html'));
+  sendNoCacheFile(res, roleFile('worker', 'worker.html'));
 });
 
-app.use(express.static(path.join(__dirname), {
+app.use(express.static(PROJECT_SOURCE_DIR, {
   extensions: ['html'],
   index: false,
 }));
-
-app.get('/admin.css', (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'admin.css'));
-});
-
-app.get('/admin.js', (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'admin.js'));
-});
-
-app.get('/organization.css', (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'organization.css'));
-});
-
-app.get('/organization.js', (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'organization.js'));
-});
-
-app.get('/safety.css', (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'safety.css'));
-});
-
-app.get('/safety.js', (req, res) => {
-  sendNoCacheFile(res, path.join(__dirname, 'safety.js'));
-});
 
 app.post('/api/auth/signup', async (req, res) => {
   const { fullName, email, organization, companyRegistrationNo, password, confirmPassword, acceptTerms } = req.body || {};
