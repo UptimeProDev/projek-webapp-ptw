@@ -8,6 +8,7 @@ const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 const ExcelJS = require('exceljs');
+const JSZip = require('jszip');
 const PROJECT_SOURCE_DIR = path.join(__dirname, 'Permit to Work Management System');
 const BACKEND_SOURCE_DIR = path.join(PROJECT_SOURCE_DIR, '01-backend');
 const AUTH_SOURCE_DIR = path.join(PROJECT_SOURCE_DIR, '02-authentication');
@@ -114,6 +115,16 @@ const PERMIT_STATUSES = [
   'resubmitted',
   'cancelled',
 ];
+const PERMIT_WORK_STATES = [
+  'not_started',
+  'active',
+  'held',
+  'stopped',
+  'resumed',
+  'final_closure',
+  'sent_for_closure',
+  'closed',
+];
 
 const STATUS_TRANSITIONS = {
   draft: ['submitted', 'cancelled'],
@@ -133,6 +144,14 @@ const DEFAULT_TEAM_USER_PASSWORD = '12345678';
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function normalizePermitWorkState(value, status = '') {
+  const clean = normalizeString(value).toLowerCase();
+  if (PERMIT_WORK_STATES.includes(clean)) return clean;
+  if (status === 'closed') return 'closed';
+  if (status === 'active') return 'active';
+  return 'not_started';
 }
 
 function addMinutesToIso(value, minutes) {
@@ -351,6 +370,26 @@ function normalizeStructuredData(value) {
   }, {});
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function decodeHtmlEntities(value) {
+  return normalizeString(value)
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)));
+}
+
 function getTemplateFieldsForDocumentType(type) {
   if (normalizeString(type).toUpperCase() === 'MOS') return MOS_TEMPLATE_FIELDS;
   if (normalizeString(type).toUpperCase() === 'JSA') return JSA_TEMPLATE_FIELDS;
@@ -483,6 +522,157 @@ async function parseMosJsaTemplate(attachmentData) {
     parseDigitalFormSheet(workbook, 'MOS', 'MOS digital form'),
     parseDigitalFormSheet(workbook, 'JSA', 'JSA digital form'),
   ].filter(Boolean);
+}
+
+function documentFieldRows(type, fields, structuredData = {}) {
+  return fields
+    .map((field) => `
+      <tr data-doc-type="${escapeHtml(type)}" data-field-key="${escapeHtml(field.key)}">
+        <td>${escapeHtml(field.key)}</td>
+        <td>${escapeHtml(field.label)}</td>
+        <td class="value" contenteditable="true">${escapeHtml(structuredData[field.key] || '')}</td>
+        <td>${escapeHtml(field.help)}</td>
+      </tr>
+    `)
+    .join('');
+}
+
+function createMosJsaDocumentTemplate(documents = []) {
+  const normalizedDocuments = normalizePermitDocuments(documents);
+  const mosData = normalizeStructuredData(normalizedDocuments.find((document) => document.type === 'MOS')?.structuredData);
+  const jsaData = normalizeStructuredData(normalizedDocuments.find((document) => document.type === 'JSA')?.structuredData);
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>MOS/JSA Digital Form</title>
+  <style>
+    body { font-family: Arial, sans-serif; color: #111827; margin: 28px; }
+    h1 { color: #0f3d91; margin-bottom: 6px; }
+    h2 { color: #0f3d91; border-bottom: 2px solid #34c759; padding-bottom: 8px; margin-top: 28px; }
+    p { color: #475569; }
+    table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    th { background: #0f3d91; color: #fff; text-align: left; }
+    th, td { border: 1px solid #cbd5e1; padding: 10px; vertical-align: top; }
+    td.value { min-height: 28px; background: #f8fafc; color: #0f172a; }
+  </style>
+</head>
+<body>
+  <h1>PTW Guardian MOS/JSA Digital Form</h1>
+  <p>Fill the Value column only. Save this document, then upload it back into the permit form to auto-fill the MOS/JSA fields.</p>
+  <p><strong>Template Version:</strong> ${escapeHtml(MOS_JSA_TEMPLATE_VERSION)}</p>
+  <h2>MOS Form</h2>
+  <table>
+    <thead><tr><th>Field Key</th><th>Field Label</th><th>Value</th><th>Help</th></tr></thead>
+    <tbody>${documentFieldRows('MOS', MOS_TEMPLATE_FIELDS, mosData)}</tbody>
+  </table>
+  <h2>JSA Form</h2>
+  <table>
+    <thead><tr><th>Field Key</th><th>Field Label</th><th>Value</th><th>Help</th></tr></thead>
+    <tbody>${documentFieldRows('JSA', JSA_TEMPLATE_FIELDS, jsaData)}</tbody>
+  </table>
+</body>
+</html>`;
+}
+
+function stripHtml(value) {
+  return decodeHtmlEntities(String(value || '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+}
+
+function parseDocumentField(html, type, field) {
+  const rowPattern = new RegExp(
+    `<tr[^>]*data-doc-type=["']${type}["'][^>]*data-field-key=["']${field.key}["'][^>]*>([\\s\\S]*?)<\\/tr>`,
+    'i',
+  );
+  const row = html.match(rowPattern)?.[1] || '';
+  if (!row) return '';
+
+  const valueMatch = row.match(/<td[^>]*class=["'][^"']*\bvalue\b[^"']*["'][^>]*>([\s\S]*?)<\/td>/i);
+  return stripHtml(valueMatch?.[1] || '');
+}
+
+function parseMosJsaHtmlDocumentTemplate(attachmentData) {
+  const html = Buffer.from(normalizeString(attachmentData), 'base64').toString('utf8');
+  return ['MOS', 'JSA']
+    .map((type) => {
+      const fields = getTemplateFieldsForDocumentType(type);
+      const structuredData = fields.reduce((values, field) => {
+        const value = parseDocumentField(html, type, field);
+        if (value) values[field.key] = value;
+        return values;
+      }, {});
+
+      return {
+        type,
+        name: `${type} digital form`,
+        source: DIGITAL_DOCUMENT_SOURCE,
+        templateVersion: MOS_JSA_TEMPLATE_VERSION,
+        structuredData,
+      };
+    })
+    .filter(Boolean);
+}
+
+function extractWordXmlBlocks(xml, tagName) {
+  const pattern = new RegExp(`<w:${tagName}\\b[\\s\\S]*?<\\/w:${tagName}>`, 'gi');
+  return String(xml || '').match(pattern) || [];
+}
+
+function extractWordCellText(cellXml) {
+  return Array.from(String(cellXml || '').matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/gi))
+    .map((match) => decodeHtmlEntities(match[1]))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseWordTableDocument(type, tableXml) {
+  const fields = getTemplateFieldsForDocumentType(type);
+  const validKeys = new Set(fields.map((field) => field.key));
+  const structuredData = {};
+
+  extractWordXmlBlocks(tableXml, 'tr').forEach((rowXml) => {
+    const cells = extractWordXmlBlocks(rowXml, 'tc').map(extractWordCellText);
+    const key = normalizeString(cells[0]);
+    const value = normalizeString(cells[2]);
+    if (validKeys.has(key) && value) {
+      structuredData[key] = value;
+    }
+  });
+
+  return {
+    type,
+    name: `${type} digital form`,
+    source: DIGITAL_DOCUMENT_SOURCE,
+    templateVersion: MOS_JSA_TEMPLATE_VERSION,
+    structuredData,
+  };
+}
+
+async function parseMosJsaDocxDocumentTemplate(attachmentData) {
+  const zip = await JSZip.loadAsync(Buffer.from(normalizeString(attachmentData), 'base64'));
+  const documentEntry = zip.file('word/document.xml');
+
+  if (!documentEntry) {
+    throw new Error('Word document content is missing.');
+  }
+
+  const documentXml = await documentEntry.async('string');
+  const tables = extractWordXmlBlocks(documentXml, 'tbl');
+
+  return [
+    parseWordTableDocument('MOS', tables[0] || ''),
+    parseWordTableDocument('JSA', tables[1] || ''),
+  ];
+}
+
+async function parseMosJsaDocumentTemplate(attachmentData, fileName = '') {
+  if (/\.docx$/i.test(normalizeString(fileName))) {
+    return parseMosJsaDocxDocumentTemplate(attachmentData);
+  }
+
+  return parseMosJsaHtmlDocumentTemplate(attachmentData);
 }
 
 function normalizeArray(value) {
@@ -689,22 +879,29 @@ function buildContentDisposition(fileName) {
   return `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(safeName)}`;
 }
 
-function storeCertificationAttachment(certificationId, fileName, attachmentData) {
+function organizationUploadDirectory(rootDir, organizationId) {
+  const scope = sanitizeDownloadFilename(normalizeString(organizationId) || 'unassigned-organization');
+  return path.join(rootDir, scope);
+}
+
+function storeCertificationAttachment(certificationId, fileName, attachmentData, organizationId = '') {
   const safeId = sanitizeDownloadFilename(certificationId || createId());
   const extension = path.extname(sanitizeDownloadFilename(fileName)).toLowerCase();
   const storageName = `${safeId}${extension || '.bin'}`;
-  const absolutePath = path.join(CERTIFICATION_UPLOAD_DIR, storageName);
-  fs.mkdirSync(CERTIFICATION_UPLOAD_DIR, { recursive: true });
+  const storageDir = organizationUploadDirectory(CERTIFICATION_UPLOAD_DIR, organizationId);
+  const absolutePath = path.join(storageDir, storageName);
+  fs.mkdirSync(storageDir, { recursive: true });
   fs.writeFileSync(absolutePath, Buffer.from(attachmentData, 'base64'));
   return path.relative(__dirname, absolutePath);
 }
 
-function storePermitDocumentAttachment(documentId, fileName, attachmentData) {
+function storePermitDocumentAttachment(documentId, fileName, attachmentData, organizationId = '') {
   const safeId = sanitizeDownloadFilename(documentId || createId());
   const extension = path.extname(sanitizeDownloadFilename(fileName)).toLowerCase();
   const storageName = `${safeId}${extension || '.bin'}`;
-  const absolutePath = path.join(PERMIT_DOCUMENT_UPLOAD_DIR, storageName);
-  fs.mkdirSync(PERMIT_DOCUMENT_UPLOAD_DIR, { recursive: true });
+  const storageDir = organizationUploadDirectory(PERMIT_DOCUMENT_UPLOAD_DIR, organizationId);
+  const absolutePath = path.join(storageDir, storageName);
+  fs.mkdirSync(storageDir, { recursive: true });
   fs.writeFileSync(absolutePath, Buffer.from(attachmentData, 'base64'));
   return path.relative(__dirname, absolutePath);
 }
@@ -719,12 +916,13 @@ function getProfilePictureExtension(fileName, mimeType) {
   return '.jpg';
 }
 
-function storeProfilePicture(userId, fileName, mimeType, attachmentData) {
+function storeProfilePicture(userId, fileName, mimeType, attachmentData, organizationId = '') {
   const safeId = sanitizeDownloadFilename(userId || createId());
   const extension = getProfilePictureExtension(fileName, mimeType);
   const storageName = `${safeId}-${Date.now()}${extension}`;
-  const absolutePath = path.join(PROFILE_PICTURE_UPLOAD_DIR, storageName);
-  fs.mkdirSync(PROFILE_PICTURE_UPLOAD_DIR, { recursive: true });
+  const storageDir = organizationUploadDirectory(PROFILE_PICTURE_UPLOAD_DIR, organizationId);
+  const absolutePath = path.join(storageDir, storageName);
+  fs.mkdirSync(storageDir, { recursive: true });
   fs.writeFileSync(absolutePath, Buffer.from(attachmentData, 'base64'));
   return path.relative(__dirname, absolutePath);
 }
@@ -899,7 +1097,12 @@ function normalizeWorkerCertifications(value, existingCertifications = [], optio
       }
 
       if (incomingAttachmentData && options.persistAttachments) {
-        attachmentPath = storeCertificationAttachment(id, fileName, incomingAttachmentData);
+        attachmentPath = storeCertificationAttachment(
+          id,
+          fileName,
+          incomingAttachmentData,
+          options.organizationId,
+        );
         attachmentData = '';
       }
 
@@ -939,7 +1142,7 @@ function serializeWorkerCertifications(certifications = [], options = {}) {
   }));
 }
 
-function normalizePermitDocumentsForStorage(documents = [], description = '', existingDocuments = []) {
+function normalizePermitDocumentsForStorage(documents = [], description = '', existingDocuments = [], options = {}) {
   const existingById = new Map();
   const existingByKey = new Map();
 
@@ -978,7 +1181,12 @@ function normalizePermitDocumentsForStorage(documents = [], description = '', ex
     }
 
     if (incomingAttachmentData) {
-      attachmentPath = storePermitDocumentAttachment(documentId, fileName, incomingAttachmentData);
+      attachmentPath = storePermitDocumentAttachment(
+        documentId,
+        fileName,
+        incomingAttachmentData,
+        options.organizationId,
+      );
       attachmentData = '';
     }
 
@@ -1136,6 +1344,35 @@ async function backfillOrganizationScopedRecords() {
   `);
 }
 
+async function backfillOrganizationLinkedRecords() {
+  await pool.execute(`
+    UPDATE audit_logs
+    JOIN permits ON permits.id = audit_logs.permit_id
+    SET audit_logs.organization_id = permits.organization_id
+    WHERE audit_logs.organization_id IS NULL
+      AND permits.organization_id IS NOT NULL
+      AND permits.organization_id <> ''
+  `);
+
+  await pool.execute(`
+    UPDATE extension_requests
+    JOIN permits ON permits.id = extension_requests.permit_id
+    SET extension_requests.organization_id = permits.organization_id
+    WHERE extension_requests.organization_id IS NULL
+      AND permits.organization_id IS NOT NULL
+      AND permits.organization_id <> ''
+  `);
+
+  await pool.execute(`
+    UPDATE notifications
+    JOIN users ON users.id = notifications.user_id
+    SET notifications.organization_id = users.organization_id
+    WHERE notifications.organization_id IS NULL
+      AND users.organization_id IS NOT NULL
+      AND users.organization_id <> ''
+  `);
+}
+
 async function activatePendingOrganizationManagedUsers() {
   await pool.execute(
     `
@@ -1218,6 +1455,8 @@ async function initializeDatabase() {
       country VARCHAR(120),
       created_at VARCHAR(40) NOT NULL,
       updated_at VARCHAR(40) NOT NULL,
+      INDEX idx_users_organization_id (organization_id),
+      INDEX idx_users_organization_role (organization_id, role),
       INDEX idx_users_token (token),
       INDEX idx_users_email (email),
       INDEX idx_users_activation_token (activation_token)
@@ -1239,6 +1478,16 @@ async function initializeDatabase() {
     'users',
     'idx_users_activation_token',
     'INDEX idx_users_activation_token (activation_token)',
+  );
+  await ensureTableIndex(
+    'users',
+    'idx_users_organization_id',
+    'INDEX idx_users_organization_id (organization_id)',
+  );
+  await ensureTableIndex(
+    'users',
+    'idx_users_organization_role',
+    'INDEX idx_users_organization_role (organization_id, role)',
   );
   await ensureTableColumn('users', 'profile_picture_path', 'profile_picture_path VARCHAR(255) NULL AFTER token');
   await ensureTableColumn('users', 'address_line1', 'address_line1 VARCHAR(255) NULL AFTER profile_picture_path');
@@ -1270,6 +1519,7 @@ async function initializeDatabase() {
       site_validation LONGTEXT,
       rejection_snapshot_hash VARCHAR(80),
       status VARCHAR(40) NOT NULL,
+      work_state VARCHAR(40) NOT NULL DEFAULT 'not_started',
       created_at VARCHAR(40) NOT NULL,
       updated_at VARCHAR(40) NOT NULL,
       INDEX idx_permits_organization_id (organization_id),
@@ -1298,6 +1548,12 @@ async function initializeDatabase() {
       ADD COLUMN is_emergency TINYINT(1) NOT NULL DEFAULT 0 AFTER approvers
     `);
   }
+
+  await ensureTableColumn(
+    'permits',
+    'work_state',
+    "work_state VARCHAR(40) NOT NULL DEFAULT 'not_started' AFTER status",
+  );
 
   await ensureTableColumn('permits', 'work_type', 'work_type VARCHAR(100) NULL AFTER title');
   await ensureTableColumn('permits', 'organization_id', 'organization_id CHAR(36) NULL AFTER id');
@@ -1332,7 +1588,7 @@ async function initializeDatabase() {
       ic_passport VARCHAR(80),
       employee_id VARCHAR(32) UNIQUE,
       name VARCHAR(255) NOT NULL,
-      full_name VARCHAR(255) NOT NULL,
+      full_name VARCHAR(255),
       role VARCHAR(120) NOT NULL,
       permits LONGTEXT,
       expiry VARCHAR(40),
@@ -1342,8 +1598,8 @@ async function initializeDatabase() {
       company VARCHAR(255),
       trade VARCHAR(120),
       organization VARCHAR(255),
-      permit_types LONGTEXT NOT NULL,
-      competencies LONGTEXT NOT NULL,
+      permit_types LONGTEXT,
+      competencies LONGTEXT,
       license_expiry VARCHAR(40),
       status VARCHAR(40) DEFAULT 'valid',
       created_by CHAR(36),
@@ -1402,6 +1658,7 @@ async function initializeDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS audit_logs (
       id CHAR(36) PRIMARY KEY,
+      organization_id CHAR(36),
       permit_id CHAR(36) NOT NULL,
       occurred_at VARCHAR(40) NOT NULL,
       actor_user_id CHAR(36),
@@ -1411,6 +1668,7 @@ async function initializeDatabase() {
       from_status VARCHAR(40),
       to_status VARCHAR(40),
       comment TEXT,
+      INDEX idx_audit_logs_organization_id (organization_id),
       INDEX idx_audit_logs_permit_id (permit_id),
       CONSTRAINT fk_audit_logs_permit
         FOREIGN KEY (permit_id) REFERENCES permits(id)
@@ -1424,6 +1682,7 @@ async function initializeDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS extension_requests (
       id CHAR(36) PRIMARY KEY,
+      organization_id CHAR(36),
       permit_id CHAR(36) NOT NULL,
       requester_user_id CHAR(36),
       worker_name VARCHAR(255),
@@ -1437,6 +1696,7 @@ async function initializeDatabase() {
       decided_at VARCHAR(40),
       requested_at VARCHAR(40) NOT NULL,
       updated_at VARCHAR(40) NOT NULL,
+      INDEX idx_extension_requests_organization_id (organization_id),
       INDEX idx_extension_requests_permit_id (permit_id),
       INDEX idx_extension_requests_status (status),
       INDEX idx_extension_requests_requested_at (requested_at),
@@ -1455,6 +1715,7 @@ async function initializeDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS notifications (
       id CHAR(36) PRIMARY KEY,
+      organization_id CHAR(36),
       user_id CHAR(36) NOT NULL,
       type VARCHAR(80) NOT NULL,
       title VARCHAR(255) NOT NULL,
@@ -1464,6 +1725,7 @@ async function initializeDatabase() {
       entity_id CHAR(36),
       read_at VARCHAR(40),
       created_at VARCHAR(40) NOT NULL,
+      INDEX idx_notifications_organization_id (organization_id),
       INDEX idx_notifications_user_created (user_id, created_at),
       INDEX idx_notifications_user_read (user_id, read_at),
       INDEX idx_notifications_entity (entity_type, entity_id),
@@ -1472,6 +1734,26 @@ async function initializeDatabase() {
         ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
   `);
+
+  await ensureTableColumn('audit_logs', 'organization_id', 'organization_id CHAR(36) NULL AFTER id');
+  await ensureTableIndex(
+    'audit_logs',
+    'idx_audit_logs_organization_id',
+    'INDEX idx_audit_logs_organization_id (organization_id)',
+  );
+  await ensureTableColumn('extension_requests', 'organization_id', 'organization_id CHAR(36) NULL AFTER id');
+  await ensureTableIndex(
+    'extension_requests',
+    'idx_extension_requests_organization_id',
+    'INDEX idx_extension_requests_organization_id (organization_id)',
+  );
+  await ensureTableColumn('notifications', 'organization_id', 'organization_id CHAR(36) NULL AFTER id');
+  await ensureTableIndex(
+    'notifications',
+    'idx_notifications_organization_id',
+    'INDEX idx_notifications_organization_id (organization_id)',
+  );
+  await backfillOrganizationLinkedRecords();
 
   await seedDemoUsers();
   await seedDemoWorkers();
@@ -1588,6 +1870,7 @@ function rowToPermit(row) {
     siteValidation: normalizeSiteValidation(decodeJson(row.site_validation)),
     rejectionSnapshotHash: row.rejection_snapshot_hash || '',
     status: row.status,
+    workState: normalizePermitWorkState(row.work_state, row.status),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1600,6 +1883,7 @@ function rowToAuditLog(row) {
 
   return {
     id: row.id,
+    organizationId: row.organization_id || '',
     permitId: row.permit_id,
     when: row.occurred_at,
     by: row.actor_name,
@@ -1618,6 +1902,7 @@ function rowToNotification(row) {
 
   return {
     id: row.id,
+    organizationId: row.organization_id || '',
     userId: row.user_id,
     type: row.type,
     title: row.title,
@@ -1639,6 +1924,7 @@ function rowToExtensionRequest(row, permit = null) {
   return {
     id: row.id,
     requestId: row.id,
+    organizationId: row.organization_id || '',
     permitId: row.permit_id,
     permit,
     workerName: row.worker_name || '',
@@ -1703,6 +1989,7 @@ async function getAllWorkers(connection = pool, options = {}) {
     LEFT JOIN users worker_users
       ON (worker_users.role = 'worker' OR worker_users.roles LIKE '%"worker"%')
       AND LOWER(worker_users.email) = LOWER(workers.email)
+      AND (workers.organization_id IS NULL OR worker_users.organization_id = workers.organization_id)
     ${whereClause}
     ORDER BY workers.created_at DESC
   `, params);
@@ -1729,7 +2016,10 @@ async function insertWorker(payload, user, connection = pool) {
       normalizeEmail(payload.email) || null,
       normalizeString(payload.company),
       encodeJson(normalizeWorkerPermitList(payload.permits).permits),
-      encodeJson(normalizeWorkerCertifications(payload.certifications, [], { persistAttachments: true })),
+      encodeJson(normalizeWorkerCertifications(payload.certifications, [], {
+        persistAttachments: true,
+        organizationId: user?.organizationId,
+      })),
       normalizeString(payload.expiry),
       normalizeString(payload.status) || 'valid',
       normalizeString(payload.reviewComment),
@@ -1753,6 +2043,7 @@ async function insertWorker(payload, user, connection = pool) {
     LEFT JOIN users worker_users
       ON (worker_users.role = 'worker' OR worker_users.roles LIKE '%"worker"%')
       AND LOWER(worker_users.email) = LOWER(workers.email)
+      AND (workers.organization_id IS NULL OR worker_users.organization_id = workers.organization_id)
     WHERE workers.id = ?
     LIMIT 1
   `,
@@ -1778,6 +2069,7 @@ async function getWorkerById(id, connection = pool, options = {}) {
     LEFT JOIN users worker_users
       ON (worker_users.role = 'worker' OR worker_users.roles LIKE '%"worker"%')
       AND LOWER(worker_users.email) = LOWER(workers.email)
+      AND (workers.organization_id IS NULL OR worker_users.organization_id = workers.organization_id)
     WHERE workers.id = ?
     LIMIT 1
   `,
@@ -1804,7 +2096,10 @@ async function updateWorker(id, payload, user, connection = pool) {
       normalizeEmail(payload.email) || null,
       normalizeString(payload.company),
       encodeJson(normalizeWorkerPermitList(payload.permits).permits),
-      encodeJson(normalizeWorkerCertifications(payload.certifications, payload.existingCertifications, { persistAttachments: true })),
+      encodeJson(normalizeWorkerCertifications(payload.certifications, payload.existingCertifications, {
+        persistAttachments: true,
+        organizationId: user?.organizationId,
+      })),
       normalizeString(payload.expiry),
       normalizeString(payload.status) || 'valid',
       normalizeString(payload.reviewComment),
@@ -2294,14 +2589,18 @@ async function createNotification(payload, connection = pool) {
 
   const id = createId();
   const timestamp = nowIso();
+  const notificationUser = await getUserById(userId, connection);
+  const organizationId =
+    normalizeString(payload?.organizationId) || normalizeString(notificationUser?.organizationId) || null;
   await connection.execute(
     `
     INSERT INTO notifications (
-      id, user_id, type, title, message, link, entity_type, entity_id, read_at, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+      id, organization_id, user_id, type, title, message, link, entity_type, entity_id, read_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
   `,
     [
       id,
+      organizationId,
       userId,
       normalizeString(payload.type || 'general').slice(0, 80),
       title,
@@ -2850,6 +3149,14 @@ async function getPermitById(id) {
   return rowToPermit(rows[0]);
 }
 
+async function getPermitOrganizationId(permitId, connection = pool) {
+  const [rows] = await connection.execute(
+    'SELECT organization_id FROM permits WHERE id = ? LIMIT 1',
+    [permitId],
+  );
+  return normalizeString(rows[0]?.organization_id);
+}
+
 async function getPermitRowsForUser(user, orderBy = 'created_at DESC') {
   const organizationId = normalizeString(user?.organizationId);
   const safeOrderBy = orderBy === 'created_at DESC' ? 'created_at DESC' : 'created_at DESC';
@@ -2908,15 +3215,17 @@ async function updatePermitSiteValidation(permit, siteValidation, user, connecti
   };
 }
 
-async function getAuditLogs(permitId, connection = pool) {
+async function getAuditLogs(permitId, connection = pool, organizationId = '') {
+  const normalizedOrganizationId = normalizeString(organizationId);
   const [rows] = await connection.execute(
     `
     SELECT *
     FROM audit_logs
     WHERE permit_id = ?
+      ${normalizedOrganizationId ? 'AND organization_id = ?' : ''}
     ORDER BY occurred_at ASC
   `,
-    [permitId],
+    normalizedOrganizationId ? [permitId, normalizedOrganizationId] : [permitId],
   );
 
   return rows.map(rowToAuditLog);
@@ -2931,7 +3240,7 @@ async function withPermitRevisionState(permit) {
     return permit;
   }
 
-  const logs = await getAuditLogs(permit.id);
+  const logs = await getAuditLogs(permit.id, pool, permit.organizationId);
   const rejectionLog = latestRejectionLog(logs);
 
   const rejectedPermit = {
@@ -2958,6 +3267,7 @@ async function withPermitRevisionState(permit) {
 async function insertAuditLog(
   {
     permitId,
+    organizationId,
     actorUserId,
     actorName,
     actorRole,
@@ -2969,11 +3279,14 @@ async function insertAuditLog(
   connection = pool,
 ) {
   const id = createId();
+  const resolvedOrganizationId =
+    normalizeString(organizationId) || await getPermitOrganizationId(permitId, connection) || null;
 
   await connection.execute(
     `
     INSERT INTO audit_logs (
       id,
+      organization_id,
       permit_id,
       occurred_at,
       actor_user_id,
@@ -2984,10 +3297,11 @@ async function insertAuditLog(
       to_status,
       comment
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
     [
       id,
+      resolvedOrganizationId,
       permitId,
       nowIso(),
       actorUserId,
@@ -3015,12 +3329,15 @@ async function getExtensionRequestById(id) {
 }
 
 async function getExtensionRequestsForUser(user) {
+  const organizationId = normalizeString(user?.organizationId);
   const [rows] = await pool.execute(
     `
     SELECT *
     FROM extension_requests
+    ${organizationId ? 'WHERE organization_id = ?' : ''}
     ORDER BY requested_at DESC, updated_at DESC
   `,
+    organizationId ? [organizationId] : [],
   );
 
   const requests = [];
@@ -3054,6 +3371,7 @@ async function insertExtensionRequest(permit, user, { requestedMinutes, reason }
       `
       INSERT INTO extension_requests (
         id,
+        organization_id,
         permit_id,
         requester_user_id,
         worker_name,
@@ -3065,12 +3383,13 @@ async function insertExtensionRequest(permit, user, { requestedMinutes, reason }
         requested_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'waiting', ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting', ?, ?)
     `,
-      [
-        id,
-        permit.id,
-        user.id,
+    [
+      id,
+      normalizeString(permit.organizationId) || null,
+      permit.id,
+      user.id,
         user.fullName || '',
         user.email || '',
         user.employeeId || '',
@@ -3202,10 +3521,11 @@ async function insertPermit(payload, user) {
         documents,
         assigned_workers,
         status,
+        work_state,
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 'not_started', ?, ?)
     `,
       [
         id,
@@ -3223,7 +3543,9 @@ async function insertPermit(payload, user) {
         encodeJson(normalizeArray(payload.ppe)),
         encodeJson(normalizeArray(payload.approvers)),
         payload.isEmergency ? 1 : 0,
-        JSON.stringify(normalizePermitDocumentsForStorage(payload.documents, payload.description)),
+        JSON.stringify(normalizePermitDocumentsForStorage(payload.documents, payload.description, [], {
+          organizationId: user.organizationId,
+        })),
         encodeJson(normalizeAssignedWorkers(payload.assignedWorkers)),
         timestamp,
         timestamp,
@@ -3321,6 +3643,7 @@ async function updatePermitDetails(permit, payload, user) {
             payload.documents,
             payload.description,
             existingDocuments,
+            { organizationId: permit.organizationId },
           ),
         ),
         encodeJson(normalizeAssignedWorkers(payload.assignedWorkers)),
@@ -3382,7 +3705,7 @@ async function updatePermitDetails(permit, payload, user) {
 
     return {
       ...updatedPermit,
-      auditLogs: await getAuditLogs(permit.id),
+      auditLogs: await getAuditLogs(permit.id, pool, permit.organizationId),
     };
   } catch (error) {
     await connection.rollback();
@@ -3392,20 +3715,41 @@ async function updatePermitDetails(permit, payload, user) {
   }
 }
 
-async function updatePermitStatus(permit, nextStatus, user, comment) {
+async function updatePermitStatus(permit, nextStatus, user, comment, options = {}) {
   const connection = await pool.getConnection();
 
   try {
     await connection.beginTransaction();
     const timestamp = nowIso();
     const rejectionSnapshotHash = nextStatus === 'rejected' ? permitRevisionHash(permit) : null;
+    const releaseStartDateTime = normalizeString(options.startDateTime);
+    const releaseEndDateTime = normalizeString(options.endDateTime);
+    const updateFields = ['status = ?', 'updated_at = ?', 'rejection_snapshot_hash = ?'];
+    const updateValues = [nextStatus, timestamp, rejectionSnapshotHash];
+    const statusWorkState = {
+      draft: 'not_started',
+      submitted: 'not_started',
+      stage1_complete: 'not_started',
+      approved: 'not_started',
+      resubmitted: 'not_started',
+      active: 'active',
+      closed: 'closed',
+      cancelled: 'closed',
+    }[nextStatus];
 
-    await connection.execute('UPDATE permits SET status = ?, updated_at = ?, rejection_snapshot_hash = ? WHERE id = ?', [
-      nextStatus,
-      timestamp,
-      rejectionSnapshotHash,
-      permit.id,
-    ]);
+    if (statusWorkState) {
+      updateFields.push('work_state = ?');
+      updateValues.push(statusWorkState);
+    }
+
+    if (releaseStartDateTime && releaseEndDateTime) {
+      updateFields.push('start_date_time = ?', 'end_date_time = ?');
+      updateValues.push(releaseStartDateTime, releaseEndDateTime);
+    }
+
+    updateValues.push(permit.id);
+
+    await connection.execute(`UPDATE permits SET ${updateFields.join(', ')} WHERE id = ?`, updateValues);
 
     await insertAuditLog(
       {
@@ -3425,7 +3769,50 @@ async function updatePermitStatus(permit, nextStatus, user, comment) {
 
     return {
       ...(await getPermitById(permit.id)),
-      auditLogs: await getAuditLogs(permit.id),
+      auditLogs: await getAuditLogs(permit.id, pool, permit.organizationId),
+    };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+async function updatePermitWorkState(permit, nextWorkState, user, comment = '') {
+  const connection = await pool.getConnection();
+  const normalizedWorkState = normalizePermitWorkState(nextWorkState, permit.status);
+  const currentWorkState = normalizePermitWorkState(permit.workState, permit.status);
+
+  try {
+    await connection.beginTransaction();
+    const timestamp = nowIso();
+
+    await connection.execute('UPDATE permits SET work_state = ?, updated_at = ? WHERE id = ?', [
+      normalizedWorkState,
+      timestamp,
+      permit.id,
+    ]);
+
+    await insertAuditLog(
+      {
+        permitId: permit.id,
+        actorUserId: user.id,
+        actorName: user.fullName,
+        actorRole: user.role,
+        action: 'work state changed',
+        fromStatus: currentWorkState,
+        toStatus: normalizedWorkState,
+        comment: normalizeString(comment),
+      },
+      connection,
+    );
+
+    await connection.commit();
+
+    return {
+      ...(await getPermitById(permit.id)),
+      auditLogs: await getAuditLogs(permit.id, pool, permit.organizationId),
     };
   } catch (error) {
     await connection.rollback();
@@ -3481,6 +3868,7 @@ function canViewPermit(user, permit) {
     return (
       permit.requestedById === user.id ||
       (hasRole(user, 'safety_officer') && permit.status !== 'draft') ||
+      (hasRole(user, 'supervisor') && ['active', 'closed'].includes(permit.status)) ||
       canWorkerAccessPermit(user, permit)
     );
   }
@@ -3709,6 +4097,7 @@ function buildRequesterDashboard(user, permits) {
 }
 
 function isPermitDueWithin(permit, hours) {
+  if (permit?.status !== 'active') return false;
   const end = new Date(permit.endDateTime);
   if (Number.isNaN(end.getTime())) return false;
 
@@ -3717,6 +4106,7 @@ function isPermitDueWithin(permit, hours) {
 }
 
 function isPermitExpired(permit) {
+  if (permit?.status !== 'active') return false;
   const end = new Date(permit?.endDateTime);
   return !Number.isNaN(end.getTime()) && end.getTime() <= Date.now();
 }
@@ -4134,6 +4524,7 @@ async function closeDb() {
 }
 
 app.use('/assets', express.static(path.join(ASSET_SOURCE_DIR, 'assets')));
+app.use('/uploads/profile-pictures', express.static(PROFILE_PICTURE_UPLOAD_DIR));
 
 [
   ['/style.css', authFile('sign-in-sign-up', 'style.css')],
@@ -4158,6 +4549,7 @@ app.use('/assets', express.static(path.join(ASSET_SOURCE_DIR, 'assets')));
   ['/support.css', sharedFile('support', 'support.css')],
   ['/support.js', sharedFile('support', 'support.js')],
   ['/role-switcher.js', sharedFile('scripts', 'role-switcher.js')],
+  ['/ptw-runtime.js', sharedFile('scripts', 'ptw-runtime.js')],
   ['/ptw-flow.css', sharedFile('styles', 'ptw-flow.css')],
 ].forEach(([route, filePath]) => registerNoCacheFileRoute(route, filePath));
 
@@ -4176,7 +4568,16 @@ app.get('/api/meta', (req, res) => {
   res.json({
     roles: ROLES,
     statuses: PERMIT_STATUSES,
+    workStates: PERMIT_WORK_STATES,
     transitions: STATUS_TRANSITIONS,
+  });
+});
+
+app.get('/api/server-time', (req, res) => {
+  res.json({
+    nowIso: nowIso(),
+    epochMs: Date.now(),
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
   });
 });
 
@@ -4663,6 +5064,7 @@ app.post('/api/account/profile-picture', authenticate, async (req, res) => {
     fileName,
     normalizedMimeType,
     normalizedAttachmentData,
+    req.user.organizationId,
   );
   const user = await updateUserProfilePicture(req.user.id, profilePicturePath);
   res.json({ user: sanitizeUser(user) });
@@ -5079,6 +5481,14 @@ app.get('/api/permit-document-templates/mos-jsa.xlsx', authenticate, async (req,
   return res.send(Buffer.from(buffer));
 });
 
+app.get('/api/permit-document-templates/mos-jsa.doc', async (req, res) => {
+  const documentHtml = createMosJsaDocumentTemplate();
+
+  res.setHeader('Content-Type', 'application/msword; charset=utf-8');
+  res.setHeader('Content-Disposition', buildContentDisposition('MOS-JSA-digital-form-template.doc'));
+  return res.send(documentHtml);
+});
+
 app.post('/api/permit-document-templates/mos-jsa/export', authenticate, async (req, res) => {
   const documents = normalizePermitDocuments(req.body?.documents || []).filter((document) =>
     STRUCTURED_PERMIT_DOCUMENT_TYPES.has(normalizeString(document.type).toUpperCase()),
@@ -5089,6 +5499,17 @@ app.post('/api/permit-document-templates/mos-jsa/export', authenticate, async (r
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', buildContentDisposition('MOS-JSA-digital-form-template.xlsx'));
   return res.send(Buffer.from(buffer));
+});
+
+app.post('/api/permit-document-templates/mos-jsa/document/export', authenticate, async (req, res) => {
+  const documents = normalizePermitDocuments(req.body?.documents || []).filter((document) =>
+    STRUCTURED_PERMIT_DOCUMENT_TYPES.has(normalizeString(document.type).toUpperCase()),
+  );
+  const documentHtml = createMosJsaDocumentTemplate(documents);
+
+  res.setHeader('Content-Type', 'application/msword; charset=utf-8');
+  res.setHeader('Content-Disposition', buildContentDisposition('MOS-JSA-digital-form-template.doc'));
+  return res.send(documentHtml);
 });
 
 app.post('/api/permit-document-templates/mos-jsa/import', authenticate, async (req, res) => {
@@ -5116,6 +5537,59 @@ app.post('/api/permit-document-templates/mos-jsa/import', authenticate, async (r
   }
 });
 
+app.post('/api/permit-document-templates/mos-jsa/document/import', authenticate, async (req, res) => {
+  try {
+    const attachmentData = normalizeString(req.body?.attachmentData || req.body?.fileData || req.body?.contentBase64);
+
+    if (!attachmentData) {
+      return res.status(400).json({ error: 'Upload a completed MOS/JSA document template' });
+    }
+
+    if (decodeBase64Size(attachmentData) > MAX_PERMIT_DOCUMENT_ATTACHMENT_BYTES) {
+      return res.status(400).json({ error: 'MOS/JSA document template exceeds 5 MB limit' });
+    }
+
+    const documents = (await parseMosJsaDocumentTemplate(attachmentData, req.body?.fileName)).filter((document) =>
+      Object.keys(normalizeStructuredData(document.structuredData)).length > 0,
+    );
+    if (!documents.length) {
+      return res.status(400).json({ error: 'Document file does not contain completed MOS or JSA form values' });
+    }
+
+    return res.json({ templateVersion: MOS_JSA_TEMPLATE_VERSION, documents });
+  } catch (error) {
+    return res.status(400).json({ error: 'Unable to read MOS/JSA document template' });
+  }
+});
+
+app.patch('/api/permits/:id/work-state', authenticate, async (req, res) => {
+  const permit = await getPermitById(req.params.id);
+
+  if (!permit) {
+    return res.status(404).json({ error: 'Permit not found' });
+  }
+
+  if (!canViewPermit(req.user, permit)) {
+    return res.status(403).json({ error: 'You are not allowed to access this permit' });
+  }
+
+  if (!hasAnyRole(req.user, ['admin', 'safety_officer', 'supervisor', 'worker', ORGANIZATION_ADMIN_ROLE])) {
+    return res.status(403).json({ error: 'You are not allowed to update permit work condition' });
+  }
+
+  const requestedWorkState = normalizeString(req.body?.workState || req.body?.state || req.body?.status);
+  const cleanWorkState = requestedWorkState.toLowerCase();
+  if (!PERMIT_WORK_STATES.includes(cleanWorkState)) {
+    return res.status(400).json({ error: 'Invalid permit work condition' });
+  }
+
+  const updatedPermit = await updatePermitWorkState(permit, cleanWorkState, req.user, req.body?.note || req.body?.comment);
+  return res.json({
+    workState: updatedPermit.workState,
+    permit: await withPermitRevisionState(updatedPermit),
+  });
+});
+
 app.get('/api/permits/:id', authenticate, async (req, res) => {
   const permit = await getPermitById(req.params.id);
 
@@ -5129,7 +5603,7 @@ app.get('/api/permits/:id', authenticate, async (req, res) => {
 
   return res.json({
     ...(await withPermitRevisionState(permit)),
-    auditLogs: await getAuditLogs(permit.id),
+    auditLogs: await getAuditLogs(permit.id, pool, permit.organizationId),
   });
 });
 
@@ -5333,9 +5807,31 @@ app.patch('/api/permits/:id/status', authenticate, async (req, res) => {
   }
 
   const { status, comment } = req.body || {};
+  const releaseStartDateTime = normalizeString(req.body?.startDateTime);
+  const releaseEndDateTime = normalizeString(req.body?.endDateTime);
 
   if (!status) {
     return res.status(400).json({ error: 'Status is required' });
+  }
+
+  if ((releaseStartDateTime || releaseEndDateTime) && status !== 'active') {
+    return res.status(400).json({ error: 'Release window can only be set when activating a permit' });
+  }
+
+  if ((releaseStartDateTime || releaseEndDateTime) && (!releaseStartDateTime || !releaseEndDateTime)) {
+    return res.status(400).json({ error: 'Both release start and permit end time are required' });
+  }
+
+  if (releaseStartDateTime && releaseEndDateTime) {
+    const releaseStart = new Date(releaseStartDateTime);
+    const releaseEnd = new Date(releaseEndDateTime);
+    if (
+      Number.isNaN(releaseStart.getTime()) ||
+      Number.isNaN(releaseEnd.getTime()) ||
+      releaseEnd.getTime() <= releaseStart.getTime()
+    ) {
+      return res.status(400).json({ error: 'Permit end time must be later than release start time' });
+    }
   }
 
   if (!PERMIT_STATUSES.includes(status)) {
@@ -5351,7 +5847,10 @@ app.patch('/api/permits/:id/status', authenticate, async (req, res) => {
     return res.status(decision.httpStatus).json(decision);
   }
 
-  const updatedPermit = await updatePermitStatus(permit, status, req.user, comment);
+  const updatedPermit = await updatePermitStatus(permit, status, req.user, comment, {
+    startDateTime: releaseStartDateTime,
+    endDateTime: releaseEndDateTime,
+  });
   return res.json(updatedPermit);
 });
 
@@ -5366,7 +5865,7 @@ app.get('/api/permits/:id/audit-logs', authenticate, async (req, res) => {
     return res.status(403).json({ error: 'You are not allowed to access this permit' });
   }
 
-  const logs = await getAuditLogs(permit.id);
+  const logs = await getAuditLogs(permit.id, pool, permit.organizationId);
   return res.json({ count: logs.length, logs, data: logs });
 });
 

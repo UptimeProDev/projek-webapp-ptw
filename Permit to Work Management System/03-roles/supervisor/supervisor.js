@@ -1,12 +1,39 @@
 document.addEventListener('DOMContentLoaded', () => {
   const PAGE_SIZE = 5;
+  const DATA_REFRESH_MS = 15000;
   const SUPERVISOR_ACCESS_ROLES = new Set(['supervisor', 'approver']);
-  const HELD_STORAGE_KEY = 'ptwSupervisorHeldPermits';
-  const WORK_STATE_STORAGE_KEY = 'ptwSupervisorWorkStates';
-  const COMPLETION_STORAGE_KEY = 'ptwWorkerCompletionRequests';
-  const DECISION_STORAGE_KEY = 'ptwSupervisorPermitDecisions';
-  const EXTENSION_STORAGE_KEY = 'ptwSupervisorWorkerExtensionRequests';
-  const SITE_VALIDATION_STORAGE_KEY = 'ptwSupervisorSiteValidationChecklists';
+
+  function storageScope() {
+    const stored = localStorage.getItem('ptwSession') || sessionStorage.getItem('ptwSession');
+
+    try {
+      const session = stored ? JSON.parse(stored) : null;
+      const user = session?.user || {};
+      const rawScope =
+        user.organizationId ||
+        user.companyRegistrationNo ||
+        user.organization ||
+        'global';
+      return String(rawScope)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'global';
+    } catch {
+      return 'global';
+    }
+  }
+
+  function scopedStorageKey(key) {
+    return `${key}:${storageScope()}`;
+  }
+
+  const HELD_STORAGE_KEY = scopedStorageKey('ptwSupervisorHeldPermits');
+  const WORK_STATE_STORAGE_KEY = scopedStorageKey('ptwSupervisorWorkStates');
+  const COMPLETION_STORAGE_KEY = scopedStorageKey('ptwWorkerCompletionRequests');
+  const DECISION_STORAGE_KEY = scopedStorageKey('ptwSupervisorPermitDecisions');
+  const EXTENSION_STORAGE_KEY = scopedStorageKey('ptwSupervisorWorkerExtensionRequests');
+  const SITE_VALIDATION_STORAGE_KEY = scopedStorageKey('ptwSupervisorSiteValidationChecklists');
 
   const elements = {
     mainPanel: document.querySelector('.main-panel'),
@@ -140,13 +167,13 @@ document.addEventListener('DOMContentLoaded', () => {
       title: 'Active Works',
       text: 'Live work fronts requiring monitoring actions.',
       empty: 'No active work',
-      getPermits: () => state.permits.filter((permit) => permit.status === 'active' && !permit.isEmergency && !isClosureTrackingPermit(permit)),
+      getPermits: () => state.permits.filter((permit) => permit.status === 'active' && !isClosureTrackingPermit(permit)),
     },
     expiring: {
       title: 'Expiring Permits',
       text: 'Permits nearing expiry and requiring supervisor attention.',
       empty: 'No expiring permits',
-      getPermits: () => state.permits.filter((permit) => ['approved', 'active'].includes(permit.status) && !isClosureTrackingPermit(permit) && isDueWithin(permit, 2)),
+      getPermits: () => state.permits.filter((permit) => isPermitExpiryEnforced(permit) && isDueWithin(permit, 2)),
     },
   };
 
@@ -245,7 +272,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function supervisorNotificationItems() {
     const pending = commandPermits().filter((permit) => ['stage1_complete', 'approved'].includes(permit.status)).length;
-    const active = state.permits.filter((permit) => permit.status === 'active' && !permit.isEmergency).length;
+    const active = state.permits.filter((permit) => permit.status === 'active').length;
     const extensions = Object.values(state.extensionDecisions || {}).length;
     return [
       {
@@ -526,6 +553,14 @@ document.addEventListener('DOMContentLoaded', () => {
     return `${date}, ${time}`;
   }
 
+  function syncedNowMs() {
+    return window.PTWTime?.now?.() || Date.now();
+  }
+
+  function syncedNowIso() {
+    return window.PTWTime?.iso?.() || new Date().toISOString();
+  }
+
   function latestCompletionRequest(permit) {
     return Object.values(state.completionRequests || {})
       .filter((request) => request?.permitId === permit.id || request?.permitDisplayId === displayPermitId(permit))
@@ -542,7 +577,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!['rejected', 'cancelled', 'returned'].includes(status)) return 'sent_for_closure';
     }
 
-    const stateName = state.workStates[permit.id]?.state || 'active';
+    const stateName = permit.workState || permit.work_state || state.workStates[permit.id]?.state || 'active';
     return stateName === 'final_closure' ? 'sent_for_closure' : stateName;
   }
 
@@ -551,7 +586,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function isLiveWorkPermit(permit) {
-    return permit.status === 'active' && !permit.isEmergency && !isClosureTrackingPermit(permit);
+    return permit.status === 'active' && !isClosureTrackingPermit(permit);
+  }
+
+  function isPermitExpiryEnforced(permit) {
+    return permit?.status === 'active' && !isClosureTrackingPermit(permit);
   }
 
   function isToday(value) {
@@ -564,26 +603,29 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function isDueWithin(permit, hours) {
-    if (isClosureTrackingPermit(permit)) return false;
+    if (!isPermitExpiryEnforced(permit)) return false;
     const end = new Date(permit.endDateTime);
     if (Number.isNaN(end.getTime())) return false;
-    const diff = end.getTime() - Date.now();
+    const diff = end.getTime() - syncedNowMs();
     return diff > 0 && diff <= hours * 60 * 60 * 1000;
   }
 
   function remainingMs(permit) {
+    if (!isPermitExpiryEnforced(permit)) return 0;
     const end = new Date(permit.endDateTime);
     if (Number.isNaN(end.getTime())) return 0;
-    return Math.max(0, end.getTime() - Date.now());
+    return Math.max(0, end.getTime() - syncedNowMs());
   }
 
   function isPermitExpired(permit) {
+    if (!isPermitExpiryEnforced(permit)) return false;
     const end = new Date(permit.endDateTime);
-    return !Number.isNaN(end.getTime()) && end.getTime() <= Date.now();
+    return !Number.isNaN(end.getTime()) && end.getTime() <= syncedNowMs();
   }
 
   function formatRemaining(permit) {
     if (isClosureTrackingPermit(permit)) return 'Stopped';
+    if (!isPermitExpiryEnforced(permit)) return 'Not released';
     const ms = remainingMs(permit);
     const totalSeconds = Math.floor(ms / 1000);
     const hours = Math.floor(totalSeconds / 3600);
@@ -636,19 +678,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const permit = state.permits.find((item) => item.id === state.reviewPermitId);
     const releaseButton = document.querySelector('[data-live-release-button="true"]');
-    if (permit && releaseButton && permit.status === 'approved' && isPermitExpired(permit)) {
-      releaseButton.disabled = true;
-      releaseButton.textContent = 'Expired';
-      releaseButton.title = 'Permit window expired. Return/reschedule or approve an extension before release.';
+    if (permit && releaseButton && permit.status === 'approved') {
+      releaseButton.disabled = false;
+      releaseButton.textContent = 'Release Work';
+      releaseButton.title = 'Release work using the supervisor validity window.';
     }
   }
 
   function remainingProgress(permit) {
-    if (isClosureTrackingPermit(permit)) return 0;
+    if (!isPermitExpiryEnforced(permit)) return 0;
     const start = new Date(permit.startDateTime).getTime();
     const end = new Date(permit.endDateTime).getTime();
     if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return 45;
-    const remaining = Math.max(0, end - Date.now());
+    const remaining = Math.max(0, end - syncedNowMs());
     return Math.max(4, Math.min(100, (remaining / (end - start)) * 100));
   }
 
@@ -828,10 +870,6 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.listContent.querySelectorAll('[data-monitoring-id]').forEach((button) => {
       button.addEventListener('click', () => setView('monitoring'));
     });
-    elements.listContent.querySelectorAll('[data-work-id]').forEach((button) => {
-      const permit = state.permits.find((item) => item.id === button.dataset.workId);
-      if (permit) applyStatus(permit, 'active', 'Supervisor released permit for active work.');
-    });
   }
 
   function renderListPermit(permit, metric) {
@@ -840,7 +878,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const status = formatQueueStatus(permit);
     const risk = classifyRisk(permit);
     const action = metric === 'approved'
-      ? `<button class="action-button success" type="button" data-work-id="${escapeHtml(permit.id)}">Work</button>`
+      ? `<button class="action-button success" type="button" data-review-id="${escapeHtml(permit.id)}">Set Window</button>`
       : metric === 'active' || metric === 'expiring'
         ? `<button class="action-button primary" type="button" data-monitoring-id="${escapeHtml(permit.id)}">Monitor</button>`
         : '';
@@ -872,7 +910,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderMonitoring() {
     const liveActive = sortPermitsForAction(state.permits.filter(isLiveWorkPermit));
     const tracked = sortMonitoringPermits(state.permits.filter((permit) =>
-      !permit.isEmergency && (permit.status === 'active' || isClosureTrackingPermit(permit)),
+      permit.status === 'active' || isClosureTrackingPermit(permit),
     ));
     const openTracked = tracked.filter((permit) => getWorkCondition(permit) !== 'closed');
     const closedTracked = tracked.filter((permit) => getWorkCondition(permit) === 'closed');
@@ -946,9 +984,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const expired = !closureTracked && isPermitExpired(permit);
     const timeClass = closureTracked ? '' : expired ? 'danger' : isDueWithin(permit, 1) ? 'danger' : isDueWithin(permit, 2) ? 'warning' : '';
     const progressStyle = `width:${remainingProgress(permit)}%`;
+    const emergencyBadge = permit.isEmergency ? '<span class="emergency-monitor-badge">Emergency Permit</span>' : '';
     const actions = stage === 'approved'
       ? `
-        <button class="execution-button success" type="button" data-work-id="${escapeHtml(permit.id)}">${expired ? 'Expired' : 'Work'}</button>
+        <button class="execution-button success" type="button" data-review-id="${escapeHtml(permit.id)}">Set Window</button>
         <button class="execution-button" type="button" data-review-id="${escapeHtml(permit.id)}">Review</button>
       `
       : closureTracked
@@ -960,10 +999,13 @@ document.addEventListener('DOMContentLoaded', () => {
       `;
 
     return `
-      <article class="execution-card ${held ? 'is-held' : ''} ${stopped ? 'is-stopped' : ''} ${sentForClosure ? 'is-closure' : ''} ${closed ? 'is-closed' : ''}">
+      <article class="execution-card ${permit.isEmergency ? 'is-emergency' : ''} ${held ? 'is-held' : ''} ${stopped ? 'is-stopped' : ''} ${sentForClosure ? 'is-closure' : ''} ${closed ? 'is-closed' : ''}">
         <div class="execution-card-head">
           <div>
-            <span>${escapeHtml(displayPermitId(permit))}</span>
+            <div class="execution-card-tags">
+              <span>${escapeHtml(displayPermitId(permit))}</span>
+              ${emergencyBadge}
+            </div>
             <h4>${escapeHtml(type)}</h4>
           </div>
           <span class="execution-icon ${escapeHtml(icon.className)}">${escapeHtml(icon.symbol)}</span>
@@ -1098,9 +1140,22 @@ document.addEventListener('DOMContentLoaded', () => {
   function setWorkState(permitId, stateName) {
     state.workStates[permitId] = {
       state: stateName,
-      updatedAt: new Date().toISOString(),
+      updatedAt: syncedNowIso(),
     };
+    state.permits = state.permits.map((permit) =>
+      permit.id === permitId ? { ...permit, workState: stateName } : permit,
+    );
     persistStoredObject(WORK_STATE_STORAGE_KEY, state.workStates);
+    apiRequest(`/api/permits/${encodeURIComponent(permitId)}/work-state`, {
+      method: 'PATCH',
+      body: JSON.stringify({ workState: stateName }),
+    })
+      .then((result) => {
+        if (!result?.permit) return;
+        const updated = normalizePermit(result.permit);
+        state.permits = state.permits.map((permit) => (permit.id === updated.id ? updated : permit));
+      })
+      .catch(() => {});
   }
 
   function formatWorkState(stateName) {
@@ -1244,8 +1299,8 @@ document.addEventListener('DOMContentLoaded', () => {
           status,
           notes,
           requestedMinutes: Number(request.requestedMinutes) || 60,
-          requestedAt: request.requestedAt || new Date().toISOString(),
-          decidedAt: new Date().toISOString(),
+          requestedAt: request.requestedAt || syncedNowIso(),
+          decidedAt: syncedNowIso(),
         };
         persistStoredObject(EXTENSION_STORAGE_KEY, state.extensionDecisions);
         closeExtensionDialog();
@@ -1277,6 +1332,98 @@ document.addEventListener('DOMContentLoaded', () => {
     setView('review');
   }
 
+  function toDatetimeLocalValue(value) {
+    const date = value instanceof Date ? value : new Date(value || syncedNowMs());
+    const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+    const localTime = new Date(safeDate.getTime() - safeDate.getTimezoneOffset() * 60000);
+    return localTime.toISOString().slice(0, 16);
+  }
+
+  function releaseWindowDefaults(permit) {
+    const now = new Date(syncedNowMs());
+    let start = new Date(permit.startDateTime);
+    if (Number.isNaN(start.getTime()) || start.getTime() < now.getTime()) start = now;
+
+    let end = new Date(permit.endDateTime);
+    if (Number.isNaN(end.getTime()) || end.getTime() <= start.getTime()) {
+      end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
+    }
+
+    return {
+      start: toDatetimeLocalValue(start),
+      end: toDatetimeLocalValue(end),
+    };
+  }
+
+  function renderReleaseWindowPanel(permit) {
+    const { start, end } = releaseWindowDefaults(permit);
+
+    return `
+      <section class="review-panel release-window-panel">
+        <h2>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2h2v2h6V2h2v2h3v18H4V4h3V2Zm11 8H6v10h12V10ZM6 8h12V6H6v2Zm7 4h2v3h3v2h-5v-5Z"/></svg>
+          Permit Validity Window
+        </h2>
+        <div class="section-rule"></div>
+        <p class="release-window-copy">Set the exact work start and end time before releasing this permit to workers.</p>
+        <div class="release-window-grid">
+          <label>
+            <span>Release start</span>
+            <input id="releaseStartDateTime" type="datetime-local" value="${escapeHtml(start)}" />
+          </label>
+          <label>
+            <span>Permit end</span>
+            <input id="releaseEndDateTime" type="datetime-local" value="${escapeHtml(end)}" />
+          </label>
+        </div>
+        <div class="release-duration-row" aria-label="Quick duration presets">
+          <button class="duration-chip" type="button" data-duration-hours="4">4 hours</button>
+          <button class="duration-chip" type="button" data-duration-hours="8">8 hours</button>
+          <button class="duration-chip" type="button" data-duration-hours="12">12 hours</button>
+          <button class="duration-chip" type="button" data-duration-hours="24">1 day</button>
+        </div>
+      </section>
+    `;
+  }
+
+  function applyReleaseDuration(hours) {
+    const startInput = elements.permitReviewContent.querySelector('#releaseStartDateTime');
+    const endInput = elements.permitReviewContent.querySelector('#releaseEndDateTime');
+    if (!startInput || !endInput) return;
+
+    const start = new Date(startInput.value || syncedNowMs());
+    const safeStart = Number.isNaN(start.getTime()) ? new Date(syncedNowMs()) : start;
+    const end = new Date(safeStart.getTime() + Number(hours) * 60 * 60 * 1000);
+    startInput.value = toDatetimeLocalValue(safeStart);
+    endInput.value = toDatetimeLocalValue(end);
+  }
+
+  function readReleaseWindowFromReview() {
+    const startValue = elements.permitReviewContent.querySelector('#releaseStartDateTime')?.value || '';
+    const endValue = elements.permitReviewContent.querySelector('#releaseEndDateTime')?.value || '';
+    const start = new Date(startValue);
+    const end = new Date(endValue);
+
+    if (!startValue || !endValue || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      return { error: 'Set the permit release start and end time before releasing work.' };
+    }
+
+    if (end.getTime() <= start.getTime()) {
+      return { error: 'Permit end time must be later than the release start time.' };
+    }
+
+    if (end.getTime() <= syncedNowMs()) {
+      return { error: 'Permit end time must be in the future before work can be released.' };
+    }
+
+    return {
+      releaseWindow: {
+        startDateTime: startValue,
+        endDateTime: endValue,
+      },
+    };
+  }
+
   function renderPermitReview() {
     const permit = state.permits.find((item) => item.id === state.reviewPermitId);
     if (!permit) {
@@ -1293,11 +1440,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const risk = classifyRisk(permit);
     const status = formatQueueStatus(permit);
+    const awaitingRelease = permit.status === 'approved';
     const expired = isPermitExpired(permit);
     const decisionCopy = permit.status === 'stage1_complete'
       ? `Permit Approval review for #${escapeHtml(displayPermitId(permit))}.`
-      : expired && permit.status === 'approved'
-        ? `Permit window expired for #${escapeHtml(displayPermitId(permit))}. Return/reschedule or approve an extension before release.`
+      : awaitingRelease
+        ? `Set the release window for #${escapeHtml(displayPermitId(permit))} before activating work.`
+        : expired
+          ? `Permit window expired for #${escapeHtml(displayPermitId(permit))}. Return/reschedule or approve an extension before release.`
         : `Work release verification for #${escapeHtml(displayPermitId(permit))}.`;
     elements.permitReviewContent.innerHTML = `
       <article class="permit-hero">
@@ -1315,10 +1465,10 @@ document.addEventListener('DOMContentLoaded', () => {
             <span class="status-line">Status: ${escapeHtml(status.label)}</span>
           </div>
         </div>
-        <div class="time-box ${expired ? 'expired' : ''}" data-countdown-permit-id="${escapeHtml(permit.id)}" data-countdown-box="true">
-          <span data-countdown-label>${expired ? 'Window Expired' : 'Time Remaining'}</span>
-          <strong data-countdown-permit-id="${escapeHtml(permit.id)}" data-countdown-value="true">${escapeHtml(formatRemaining(permit))}</strong>
-          <em data-countdown-expired-note ${expired ? '' : 'hidden'}>Release blocked</em>
+        <div class="time-box ${expired ? 'expired' : ''}" ${awaitingRelease ? '' : `data-countdown-permit-id="${escapeHtml(permit.id)}" data-countdown-box="true"`}>
+          <span ${awaitingRelease ? '' : 'data-countdown-label'}>${awaitingRelease ? 'Release Window' : expired ? 'Window Expired' : 'Time Remaining'}</span>
+          <strong ${awaitingRelease ? '' : `data-countdown-permit-id="${escapeHtml(permit.id)}" data-countdown-value="true"`}>${escapeHtml(awaitingRelease ? 'Set below' : formatRemaining(permit))}</strong>
+          <em data-countdown-expired-note ${expired || awaitingRelease ? '' : 'hidden'}>${awaitingRelease ? 'Required before release' : 'Release blocked'}</em>
         </div>
       </article>
 
@@ -1339,6 +1489,7 @@ document.addEventListener('DOMContentLoaded', () => {
           </section>
 
           ${permit.status === 'stage1_complete' ? renderPermitApprovalValidation(permit) : ''}
+          ${permit.status === 'approved' ? renderReleaseWindowPanel(permit) : ''}
 
           <section class="review-panel">
             <h2>
@@ -1390,6 +1541,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     elements.permitReviewContent.querySelectorAll('[data-site-checklist]').forEach((button) => {
       button.addEventListener('click', () => openSiteChecklistDialog(permit, button.dataset.siteChecklist));
+    });
+    elements.permitReviewContent.querySelectorAll('[data-duration-hours]').forEach((button) => {
+      button.addEventListener('click', () => applyReleaseDuration(button.dataset.durationHours));
     });
     elements.permitReviewContent.querySelector('[data-mos-jsa-export]')?.addEventListener('click', (event) => {
       event.preventDefault();
@@ -1913,7 +2067,7 @@ document.addEventListener('DOMContentLoaded', () => {
       [checklist.key]: {
         checked,
         notes: elements.siteChecklistDialogContent.querySelector('#siteChecklistNotes')?.value.trim() || '',
-        updatedAt: new Date().toISOString(),
+        updatedAt: syncedNowIso(),
       },
     };
     updatePermitSiteValidationState(permit.id, state.siteValidationChecklists[permit.id]);
@@ -1989,9 +2143,11 @@ document.addEventListener('DOMContentLoaded', () => {
         ]
       : [
           ['Permit Approval', 'Permit Approval completed before work release', 'Complete'],
-          isPermitExpired(permit)
-            ? ['Permit Window', 'Approved end time has passed. Reschedule or extend before release.', 'Expired']
-            : ['Permit Window', 'Approved work window is still valid', 'Valid'],
+          permit.status === 'approved'
+            ? ['Permit Window', 'Supervisor release start and end time must be set before work starts', 'Set on Release']
+            : isPermitExpired(permit)
+              ? ['Permit Window', 'Approved end time has passed. Reschedule or extend before release.', 'Expired']
+              : ['Permit Window', 'Active work window is still valid', 'Valid'],
           ['Conflict Check', 'No overlapping active activities', 'No Conflicts'],
           ['LOTO Verification', permit.controls.some((control) => /loto|isolation/i.test(control)) ? 'Isolation controls listed' : 'Not required for this scope', 'Verified'],
         ];
@@ -2025,10 +2181,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const approveLabel = permit.status === 'stage1_complete' ? 'Approve Permit Approval' : 'Release Work';
-    const releaseExpired = permit.status === 'approved' && isPermitExpired(permit);
     return `
       <button class="decision-button" type="button" data-decision="return">Return</button>
-      <button class="decision-button primary" type="button" data-decision="approve" ${permit.status === 'approved' ? 'data-live-release-button="true"' : ''} ${releaseExpired ? 'disabled title="Permit window expired. Return/reschedule or approve an extension before release."' : ''}>${releaseExpired ? 'Expired' : approveLabel}</button>
+      <button class="decision-button primary" type="button" data-decision="approve" ${permit.status === 'approved' ? 'data-live-release-button="true"' : ''}>${approveLabel}</button>
       <button class="decision-button danger" type="button" data-decision="reject">Reject</button>
     `;
   }
@@ -2066,10 +2221,6 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast(`${displayPermitId(permit)} is already approved and active.`);
       return null;
     }
-    if (decision === 'approve' && permit.status === 'approved' && isPermitExpired(permit)) {
-      showToast('Permit window expired. Return for reschedule or approve an extension before release.');
-      return null;
-    }
     if (decision === 'approve' && permit.status === 'stage1_complete') {
       const incompleteChecklist = getSiteValidationChecklists(permit).find(
         (checklist) => !isSiteChecklistComplete(permit.id, checklist),
@@ -2085,8 +2236,21 @@ document.addEventListener('DOMContentLoaded', () => {
       return null;
     }
 
-    return applyStatus(permit, reviewDecision.status, notes || reviewDecision.fallbackNote, {
+    const options = {
       outcome: reviewDecision.outcome,
+    };
+
+    if (decision === 'approve' && permit.status === 'approved') {
+      const releaseWindowResult = readReleaseWindowFromReview();
+      if (releaseWindowResult.error) {
+        showToast(releaseWindowResult.error);
+        return null;
+      }
+      options.releaseWindow = releaseWindowResult.releaseWindow;
+    }
+
+    return applyStatus(permit, reviewDecision.status, notes || reviewDecision.fallbackNote, {
+      ...options,
     });
   }
 
@@ -2111,6 +2275,7 @@ document.addEventListener('DOMContentLoaded', () => {
         body: JSON.stringify({
           status,
           comment: notes || comments[status] || `Status changed to ${status}`,
+          ...(options.releaseWindow || {}),
         }),
       });
       state.heldPermits.delete(permit.id);
@@ -2121,7 +2286,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (options.outcome) {
         state.permitDecisions[permit.id] = {
           outcome: options.outcome,
-          updatedAt: new Date().toISOString(),
+          updatedAt: syncedNowIso(),
         };
       }
       if (status === 'closed') {
@@ -2436,6 +2601,10 @@ document.addEventListener('DOMContentLoaded', () => {
     setView('dashboard');
     updateLiveTimers();
     setInterval(updateLiveTimers, 1000);
+    setInterval(() => {
+      if (document.hidden || state.activeView === 'review') return;
+      refreshData().catch(() => {});
+    }, DATA_REFRESH_MS);
   }
 
   init().catch((error) => {

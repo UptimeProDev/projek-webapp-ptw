@@ -1,7 +1,32 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const EXTENSION_STORAGE_KEY = 'ptwSupervisorWorkerExtensionRequests';
-  const COMPLETION_STORAGE_KEY = 'ptwWorkerCompletionRequests';
-  const WORK_STATE_STORAGE_KEY = 'ptwSupervisorWorkStates';
+  function storageScope() {
+    const stored = localStorage.getItem('ptwSession') || sessionStorage.getItem('ptwSession');
+
+    try {
+      const session = stored ? JSON.parse(stored) : null;
+      const user = session?.user || {};
+      const rawScope =
+        user.organizationId ||
+        user.companyRegistrationNo ||
+        user.organization ||
+        'global';
+      return String(rawScope)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'global';
+    } catch {
+      return 'global';
+    }
+  }
+
+  function scopedStorageKey(key) {
+    return `${key}:${storageScope()}`;
+  }
+
+  const EXTENSION_STORAGE_KEY = scopedStorageKey('ptwSupervisorWorkerExtensionRequests');
+  const COMPLETION_STORAGE_KEY = scopedStorageKey('ptwWorkerCompletionRequests');
+  const WORK_STATE_STORAGE_KEY = scopedStorageKey('ptwSupervisorWorkStates');
 
   const elements = {
     navItems: Array.from(document.querySelectorAll('.nav-item[data-view]')),
@@ -75,9 +100,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const stored = localStorage.getItem('ptwSession') || sessionStorage.getItem('ptwSession');
     try {
       const session = stored ? JSON.parse(stored) : null;
-      return `ptwWorkerLogs:${session?.user?.email || 'anonymous'}`;
+      return `ptwWorkerLogs:${storageScope()}:${session?.user?.email || 'anonymous'}`;
     } catch {
-      return 'ptwWorkerLogs:anonymous';
+      return `ptwWorkerLogs:${storageScope()}:anonymous`;
     }
   }
 
@@ -390,17 +415,32 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function getWorkState(permit) {
-    return state.workStates[permit.id]?.state || 'active';
+    return permit.workState || permit.work_state || state.workStates[permit.id]?.state || 'active';
   }
 
   function setWorkState(permit, status, note = '') {
+    const updatedAt = window.PTWTime?.iso?.() || new Date().toISOString();
     state.workStates[permit.id] = {
       state: status,
       note,
-      updatedAt: new Date().toISOString(),
+      updatedAt,
       by: state.session?.user?.email || '',
     };
+    permit.workState = status;
     persistStoredObject(WORK_STATE_STORAGE_KEY, state.workStates);
+    apiRequest(`/api/permits/${encodeURIComponent(permit.id)}/work-state`, {
+      method: 'PATCH',
+      body: JSON.stringify({ workState: status, note }),
+    })
+      .then((result) => {
+        if (!result?.permit) return;
+        const updated = normalizePermit(result.permit);
+        state.permits = state.permits.map((item) => (item.id === updated.id ? updated : item));
+        if (state.selectedPermit?.id === updated.id) {
+          state.selectedPermit = updated;
+        }
+      })
+      .catch(() => {});
   }
 
   function formatDateTime(value) {
@@ -418,31 +458,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function countdownParts(permit) {
     if (permit.status === 'closed') {
-      return { value: 'CLOSED', label: 'Final closure complete' };
+      return { value: 'CLOSED', label: 'Final closure complete', subvalue: '' };
     }
 
     if (isFinalClosureSubmitted(permit)) {
-      return { value: 'STOPPED', label: 'Submitted for final closure' };
+      return { value: 'STOPPED', label: 'Submitted for final closure', subvalue: '' };
     }
 
     const end = new Date(permit.endDateTime);
     if (Number.isNaN(end.getTime())) {
-      return { value: '--:--:--', label: 'No end time' };
+      return { value: '--:--:--', label: 'No end time', subvalue: '' };
     }
 
-    const diff = end.getTime() - Date.now();
+    const diff = end.getTime() - (window.PTWTime?.now?.() || Date.now());
     if (diff <= 0) {
-      return { value: '00:00:00', label: 'Permit window expired' };
+      return { value: '00:00:00', label: 'Permit window expired', subvalue: '' };
     }
 
     const totalSeconds = Math.floor(diff / 1000);
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = totalSeconds % 60;
+    const timeValue = `${String(hours).padStart(2, '0')}h:${String(minutes).padStart(2, '0')}m:${String(seconds).padStart(2, '0')}s`;
 
     return {
-      value: [hours, minutes, seconds].map((part) => String(part).padStart(2, '0')).join(':'),
+      value: timeValue,
       label: 'Permit validity remaining',
+      subvalue: '',
     };
   }
 
@@ -450,7 +492,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isFinalClosureSubmitted(permit)) return false;
     const end = new Date(permit.endDateTime);
     if (Number.isNaN(end.getTime())) return false;
-    const diff = end.getTime() - Date.now();
+    const diff = end.getTime() - (window.PTWTime?.now?.() || Date.now());
     return diff > 0 && diff <= 60 * 60 * 1000 && permit.status === 'active';
   }
 
@@ -667,7 +709,10 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
         <div class="validity-compact">
           <strong class="validity-time" id="countdownValue">${escapeHtml(countdown.value)}</strong>
-          <span id="countdownLabel">${escapeHtml(countdown.label)}</span>
+          <span class="validity-copy">
+            <span id="countdownLabel">${escapeHtml(countdown.label)}</span>
+            <small id="countdownSubvalue" ${countdown.subvalue ? '' : 'hidden'}>${escapeHtml(countdown.subvalue || '')}</small>
+          </span>
         </div>
         <div class="site-row">
           <span>Work Site: <strong>${escapeHtml(permit.location || '-')}</strong></span>
@@ -803,11 +848,16 @@ document.addEventListener('DOMContentLoaded', () => {
   function updateCountdown(permit) {
     const value = document.querySelector('#countdownValue');
     const label = document.querySelector('#countdownLabel');
+    const subvalue = document.querySelector('#countdownSubvalue');
     if (!value || !label) return;
 
     const countdown = countdownParts(permit);
     value.textContent = countdown.value;
     label.textContent = countdown.label;
+    if (subvalue) {
+      subvalue.textContent = countdown.subvalue || '';
+      subvalue.hidden = !countdown.subvalue;
+    }
   }
 
   function wireDetailActions(permit) {
@@ -1051,7 +1101,7 @@ document.addEventListener('DOMContentLoaded', () => {
       fireWatchCompleted,
       evidenceName: evidence?.name || '',
       notes,
-      submittedAt: new Date().toISOString(),
+      submittedAt: window.PTWTime?.iso?.() || new Date().toISOString(),
     };
     persistStoredObject(COMPLETION_STORAGE_KEY, state.completionRequests);
     setWorkState(permit, 'final_closure', 'Worker completed work and submitted to Admin for final closure');

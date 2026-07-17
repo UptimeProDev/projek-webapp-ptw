@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Safety Officer Lane 3 | PTW Guardian</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/safety.css?v=lane20" />
+  <link rel="stylesheet" href="/safety.css?v=lane29" />
   </head>
 <body>
   <div class="safety-shell">
@@ -16,7 +16,7 @@
         <span></span>
       </button>
       <div class="brand">
-        <img class="brand-logo" src="/assets/ptw-guardian-login-v2.png" alt="PTW Guardian" />
+        <img class="brand-logo" src="/assets/ptw-guardian-brandmark-v3.png" alt="PTW Guardian" />
       </div>
 
       <nav class="safety-nav" aria-label="Safety officer work queues">
@@ -34,12 +34,25 @@
 
     <main class="safety-main">
       <header class="safety-topbar">
-        <div>
-          <span class="eyebrow">Virtual HSE Safety Officer</span>
+        <div class="page-title">
           <h2 id="pageTitle">Safety Officer Dashboard</h2>
-          <p id="pageSubtitle">Review active safety work, stage decisions, emergency approvals, and returned permits.</p>
+          <p id="pageSubtitle" class="header-subtitle">Review active safety work, stage decisions, emergency approvals, and returned permits.</p>
         </div>
-        <div class="profile">
+
+        <label class="search-box">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 19.6-5.4-5.4a7.6 7.6 0 1 0-1.4 1.4L19.6 21 21 19.6ZM4 10a6 6 0 1 1 12 0 6 6 0 0 1-12 0Z"/></svg>
+          <span class="sr-only">Search safety permits</span>
+          <input id="searchInput" type="search" placeholder="Search permit, location, requester, hazard">
+        </label>
+
+        <button class="icon-button" id="refreshButton" type="button" aria-label="Refresh safety data">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h8V3l-3.3 3.3Z" />
+          </svg>
+        </button>
+
+        <div class="topbar-divider" aria-hidden="true"></div>
+
           <div class="notification-wrap">
             <button class="icon-button" type="button" id="notificationButton" aria-label="Open notifications" aria-expanded="false" aria-controls="notificationPanel">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -58,11 +71,7 @@
               <div class="notification-list" id="notificationList"></div>
             </div>
           </div>
-          <button class="icon-button" id="refreshButton" type="button" aria-label="Refresh safety data">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h8V3l-3.3 3.3Z" />
-            </svg>
-          </button>
+
           <button class="profile-button" type="button" id="accountButton" aria-label="Open account settings">
             <span class="profile-copy">
               <strong id="profileName">Safety Officer</strong>
@@ -70,7 +79,6 @@
             </span>
             <span class="profile-avatar" id="profileAvatar">SO</span>
           </button>
-        </div>
       </header>
 
       <div class="auth-warning hidden" id="safetyWarning">
@@ -80,22 +88,22 @@
       </div>
 
       <section class="summary-grid" aria-label="Safety review summary">
-        <article>
+        <article role="button" tabindex="0" data-summary-view="stage1">
           <span>MOS Approval</span>
           <strong id="stage1Count">0</strong>
           <small>Submitted methodology</small>
         </article>
-        <article>
+        <article role="button" tabindex="0" data-summary-view="stage2">
           <span>Permit Approval</span>
           <strong id="stage2Count">0</strong>
           <small>Scheduled site validation</small>
         </article>
-        <article class="critical">
+        <article class="critical" role="button" tabindex="0" data-summary-view="emergency">
           <span>Emergency</span>
           <strong id="emergencyCount">0</strong>
           <small>48-hour maximum review</small>
         </article>
-        <article>
+        <article role="button" tabindex="0" data-summary-view="audit">
           <span>Returned</span>
           <strong id="returnedCount">0</strong>
           <small>Correction required</small>
@@ -111,7 +119,6 @@
             </div>
             <span class="pill" id="queueCount">0 items</span>
           </div>
-          <input class="queue-search" id="searchInput" type="search" placeholder="Search permit, location, requester, hazard">
           <div class="queue-items" id="queueItems"></div>
         </div>
 
@@ -155,6 +162,7 @@
     <div class="site-checklist-dialog-content" id="siteChecklistDialogContent"></div>
   </dialog>
 
+  <script src="/ptw-runtime.js?v=1"></script>
   <script src="/role-switcher.js?v=4"></script>
   <script src="/safety.js?v=lane25"></script>
 </body>

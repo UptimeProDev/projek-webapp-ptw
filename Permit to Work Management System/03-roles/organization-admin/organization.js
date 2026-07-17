@@ -43,6 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
     users: [],
     assignableRoles: roleOrder,
     editingUserId: '',
+    statusTimer: null,
   };
 
   function readSession() {
@@ -101,9 +102,28 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function setStatus(message, type = '') {
+    if (state.statusTimer) {
+      window.clearTimeout(state.statusTimer);
+      state.statusTimer = null;
+    }
+    elements.sectionStatus.hidden = false;
     elements.sectionStatus.textContent = message;
     elements.sectionStatus.classList.toggle('success', type === 'success');
     elements.sectionStatus.classList.toggle('error', type === 'error');
+    elements.sectionStatus.classList.remove('is-dismissed');
+
+    if (type === 'success') {
+      state.statusTimer = window.setTimeout(() => {
+        if (elements.sectionStatus.textContent === message) {
+          elements.sectionStatus.classList.add('is-dismissed');
+          window.setTimeout(() => {
+            if (elements.sectionStatus.textContent === message && elements.sectionStatus.classList.contains('is-dismissed')) {
+              elements.sectionStatus.hidden = true;
+            }
+          }, 320);
+        }
+      }, 5200);
+    }
   }
 
   function redirectToRoleHome(user) {

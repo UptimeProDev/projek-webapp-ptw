@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Organization Admin | PTW Guardian</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/organization.css?v=5" />
+  <link rel="stylesheet" href="/organization.css?v=11" />
 </head>
 <body>
   <div class="org-shell">
@@ -16,7 +16,7 @@
         <span></span>
       </button>
       <div class="org-brand">
-        <img src="/assets/ptw-guardian-login-v2.png" alt="PTW Guardian" />
+        <img src="/assets/ptw-guardian-brandmark-v3.png" alt="PTW Guardian" />
       </div>
 
       <nav class="org-nav">
@@ -31,12 +31,33 @@
 
     <main class="org-main">
       <header class="org-topbar">
-        <button class="org-profile" type="button" id="profileButton" aria-label="Open account menu">
-          <span>
+        <div class="page-title">
+          <h2>Organization Admin</h2>
+        </div>
+
+        <label class="search-box">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 19.6-5.4-5.4a7.6 7.6 0 1 0-1.4 1.4L19.6 21 21 19.6ZM4 10a6 6 0 1 1 12 0 6 6 0 0 1-12 0Z"/></svg>
+          <span class="sr-only">Search organization users</span>
+          <input type="search" placeholder="Search team members or roles..." />
+        </label>
+
+        <button class="icon-button" type="button" aria-label="Refresh organization workspace">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h8V3l-3.3 3.3Z"/></svg>
+        </button>
+
+        <div class="topbar-divider" aria-hidden="true"></div>
+
+        <button class="icon-button notification-button" type="button" aria-label="Notifications">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a2.4 2.4 0 0 0 2.3-1.8H9.7A2.4 2.4 0 0 0 12 22ZM5 17h14l-1.7-2.3V10a5.3 5.3 0 0 0-4.2-5.2V3a1.1 1.1 0 0 0-2.2 0v1.8A5.3 5.3 0 0 0 6.7 10v4.7L5 17Z"/></svg>
+          <span class="notification-dot" aria-hidden="true"></span>
+        </button>
+
+        <button class="org-profile profile-button" type="button" id="profileButton" aria-label="Open account menu">
+          <span class="profile-copy">
             <strong id="profileName">Organization Admin</strong>
-            <small id="profileRole">Workspace Owner</small>
+            <span id="profileRole">Workspace Owner</span>
           </span>
-          <span class="org-avatar" id="profileAvatar">OA</span>
+          <span class="org-avatar profile-avatar" id="profileAvatar">OA</span>
         </button>
       </header>
 
@@ -149,7 +170,8 @@
     </section>
   </div>
 
-  <script src="/organization.js?v=5"></script>
+  <script src="/ptw-runtime.js?v=1"></script>
+  <script src="/organization.js?v=6"></script>
   <script src="/role-switcher.js?v=4"></script>
 </body>
 </html>

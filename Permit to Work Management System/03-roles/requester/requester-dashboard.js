@@ -12,13 +12,41 @@
   const API_BASE = getApiBase();
   const OFFLINE_TOKEN = "offline-requester-demo";
   const MAX_PERMIT_DOCUMENT_BYTES = 5 * 1024 * 1024;
+
+  function storageScope() {
+    const stored =
+      localStorage.getItem("ptwSession") ||
+      sessionStorage.getItem("ptwSession");
+
+    try {
+      const session = stored ? JSON.parse(stored) : null;
+      const user = session?.user || {};
+      const rawScope =
+        user.organizationId ||
+        user.companyRegistrationNo ||
+        user.organization ||
+        "global";
+      return String(rawScope)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, "-")
+        .replace(/^-+|-+$/g, "") || "global";
+    } catch {
+      return "global";
+    }
+  }
+
+  function scopedStorageKey(key) {
+    return `${key}:${storageScope()}`;
+  }
+
   const STORAGE_KEYS = {
     session: "ptwSession",
-    offlinePermits: "ptwRequesterOfflinePermits",
-    permitCodes: "ptwRequesterPermitCodes",
-    workers: "ptwRequesterWorkers",
-    workStates: "ptwSupervisorWorkStates",
-    completionRequests: "ptwWorkerCompletionRequests",
+    offlinePermits: scopedStorageKey("ptwRequesterOfflinePermits"),
+    permitCodes: scopedStorageKey("ptwRequesterPermitCodes"),
+    workers: scopedStorageKey("ptwRequesterWorkers"),
+    workStates: scopedStorageKey("ptwSupervisorWorkStates"),
+    completionRequests: scopedStorageKey("ptwWorkerCompletionRequests"),
   };
   const DRAFT_PLACEHOLDERS = {
     title: "Untitled permit draft",
@@ -645,7 +673,7 @@
       day: "numeric",
       year: "numeric",
     });
-    elements.currentDateLabel.textContent = `Today, ${formatter.format(new Date())}`;
+    elements.currentDateLabel.textContent = `Today, ${formatter.format(window.PTWTime?.date?.() || new Date())}`;
   }
 
   async function initializeSession() {
@@ -1037,7 +1065,7 @@
       }
     }
 
-    const stateName = String(state.workStates?.[permit.id]?.state || "").toLowerCase();
+    const stateName = String(permit.workState || permit.work_state || state.workStates?.[permit.id]?.state || "").toLowerCase();
     if (stateName === "held") return { key: "hold", label: "Hold" };
     if (stateName === "stopped") return { key: "stop", label: "Stop" };
     if (stateName === "resumed") return { key: "resume", label: "Resume" };
@@ -1683,10 +1711,6 @@
   function rowButton(operation, id, label, tone = "") {
     return `
       <button class="row-button ${tone}" type="button" data-operation="${operation}" data-id="${id}">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M5 12h14" />
-          <path d="m13 6 6 6-6 6" />
-        </svg>
         ${escapeHtml(label)}
       </button>
     `;
@@ -1695,6 +1719,10 @@
   function renderFilters() {
     document.querySelectorAll("[data-status-filter]").forEach((button) => {
       button.classList.toggle("is-active", button.dataset.statusFilter === state.activeFilter);
+    });
+
+    document.querySelectorAll("[data-summary-filter]").forEach((card) => {
+      card.classList.toggle("is-active", card.dataset.summaryFilter === state.activeFilter);
     });
   }
 
@@ -1892,7 +1920,7 @@
         return `
           <span class="${ready ? "is-ready" : ""}">
             <strong>${escapeHtml(type)}</strong>
-            ${ready ? "Digital form ready" : "Fill online or import Excel"}
+            ${ready ? "Digital form ready" : "Fill online or import document"}
           </span>
         `;
       })
@@ -1902,29 +1930,72 @@
   async function downloadMosJsaTemplate() {
     try {
       syncStructuredDocumentsFromEditor();
-      const response = await fetch(`${API_BASE}/api/permit-document-templates/mos-jsa/export`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          Authorization: `Bearer ${state.session?.token || OFFLINE_TOKEN}`,
-        },
-        body: JSON.stringify({ documents: state.structuredDocuments }),
-      });
-
-      if (!response.ok) throw new Error("Template download failed");
-
-      const blob = await response.blob();
+      const html = createMosJsaDocumentTemplate(state.structuredDocuments);
+      const blob = new Blob([html], { type: "application/msword;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = "MOS-JSA-digital-form-template.xlsx";
+      link.download = "MOS-JSA-digital-form-template.doc";
       document.body.appendChild(link);
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-    } catch {
-      showToast("Unable to download MOS/JSA Excel template.");
+    } catch (error) {
+      showToast(error.message || "Unable to download MOS/JSA document template.");
     }
+  }
+
+  function documentFieldRows(type, fields, structuredData = {}) {
+    return fields
+      .map(
+        (field) => `
+          <tr data-doc-type="${escapeHtml(type)}" data-field-key="${escapeHtml(field.key)}">
+            <td>${escapeHtml(field.key)}</td>
+            <td>${escapeHtml(field.label)}</td>
+            <td class="value" contenteditable="true">${escapeHtml(structuredData[field.key] || "")}</td>
+            <td>${escapeHtml(field.help || "")}</td>
+          </tr>
+        `,
+      )
+      .join("");
+  }
+
+  function createMosJsaDocumentTemplate(documents = []) {
+    const byType = new Map(getStructuredDocuments(documents).map((document) => [document.type, document]));
+    const mosData = normalizeStructuredData(byType.get("MOS")?.structuredData);
+    const jsaData = normalizeStructuredData(byType.get("JSA")?.structuredData);
+
+    return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>MOS/JSA Digital Form</title>
+  <style>
+    body { font-family: Arial, sans-serif; color: #111827; margin: 28px; }
+    h1 { color: #0f3d91; margin-bottom: 6px; }
+    h2 { color: #0f3d91; border-bottom: 2px solid #34c759; padding-bottom: 8px; margin-top: 28px; }
+    p { color: #475569; }
+    table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    th { background: #0f3d91; color: #fff; text-align: left; }
+    th, td { border: 1px solid #cbd5e1; padding: 10px; vertical-align: top; }
+    td.value { min-height: 28px; background: #f8fafc; color: #0f172a; }
+  </style>
+</head>
+<body>
+  <h1>PTW Guardian MOS/JSA Digital Form</h1>
+  <p>Fill the Value column only. Save this document, then upload it back into the permit form to auto-fill the MOS/JSA fields.</p>
+  <h2>MOS Form</h2>
+  <table>
+    <thead><tr><th>Field Key</th><th>Field Label</th><th>Value</th><th>Help</th></tr></thead>
+    <tbody>${documentFieldRows("MOS", digitalDocumentSchemas.MOS.fields, mosData)}</tbody>
+  </table>
+  <h2>JSA Form</h2>
+  <table>
+    <thead><tr><th>Field Key</th><th>Field Label</th><th>Value</th><th>Help</th></tr></thead>
+    <tbody>${documentFieldRows("JSA", digitalDocumentSchemas.JSA.fields, jsaData)}</tbody>
+  </table>
+</body>
+</html>`;
   }
 
   function permitExportFileName(permit) {
@@ -1932,7 +2003,7 @@
       .trim()
       .replace(/[\\/:*?"<>|]+/g, "-")
       .replace(/\s+/g, "-");
-    return `${label || "permit"}-MOS-JSA.xlsx`;
+    return `${label || "permit"}-MOS-JSA.doc`;
   }
 
   async function downloadPermitMosJsaExcel(permit) {
@@ -1942,7 +2013,7 @@
       throw new Error("No MOS/JSA digital form data available for export.");
     }
 
-    const response = await fetch(`${API_BASE}/api/permit-document-templates/mos-jsa/export`, {
+    const response = await fetch(`${API_BASE}/api/permit-document-templates/mos-jsa/document/export`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -1952,7 +2023,7 @@
     });
 
     if (!response.ok) {
-      let message = "Unable to export MOS/JSA Excel.";
+      let message = "Unable to export MOS/JSA document.";
       try {
         const body = await response.json();
         message = body.error || message;
@@ -1977,38 +2048,77 @@
     if (!file) return;
 
     try {
-      if (!/\.xlsx$/i.test(file.name)) {
-        showToast("Upload the completed MOS/JSA .xlsx template.");
+      if (!/\.(docx?|html?)$/i.test(file.name)) {
+        showToast("Upload the completed MOS/JSA document template.");
         return;
       }
 
       if (file.size > MAX_PERMIT_DOCUMENT_BYTES) {
-        showToast("MOS/JSA Excel template must be 5 MB or smaller.");
+        showToast("MOS/JSA document template must be 5 MB or smaller.");
         return;
       }
 
-      const attachmentData = await readFileAsBase64(file);
-      const result = await apiRequest("/api/permit-document-templates/mos-jsa/import", {
-        method: "POST",
-        body: JSON.stringify({
-          fileName: file.name,
-          attachmentData,
-        }),
-      });
+      const result = /\.docx$/i.test(file.name)
+        ? await apiRequest("/api/permit-document-templates/mos-jsa/document/import", {
+            method: "POST",
+            body: JSON.stringify({
+              fileName: file.name,
+              attachmentData: await readFileAsBase64(file),
+            }),
+          })
+        : { documents: parseMosJsaDocumentTemplate(await file.text()) };
+
+      if (!result.documents.length) {
+        throw new Error("No completed MOS/JSA values found in the document.");
+      }
 
       upsertStructuredDocuments(result.documents || []);
       const existingPermit = state.editingId ? findPermit(state.editingId) : null;
       renderDigitalDocumentEditor(existingPermit?.documents || []);
       renderDigitalDocumentStatus(existingPermit?.documents || []);
       updateDocumentStatuses(existingPermit?.documents || []);
-      showToast("MOS/JSA Excel form imported.");
+      showToast("MOS/JSA document form imported.");
     } catch (error) {
-      showToast(error.error || "Unable to import MOS/JSA Excel template.");
+      showToast(error.message || error.error || "Unable to import MOS/JSA document template.");
     } finally {
       if (elements.importMosJsaTemplateInput) {
         elements.importMosJsaTemplateInput.value = "";
       }
     }
+  }
+
+  function parseMosJsaDocumentTemplate(html) {
+    const parsed = new DOMParser().parseFromString(String(html || ""), "text/html");
+
+    return Object.entries(digitalDocumentSchemas)
+      .map(([type, schema]) => {
+        const structuredData = {};
+
+        schema.fields.forEach((field) => {
+          const row = parsed.querySelector(`tr[data-doc-type="${type}"][data-field-key="${field.key}"]`);
+          const valueCell = row?.querySelector(".value");
+          const value = String(valueCell?.textContent || "").trim();
+          if (value) structuredData[field.key] = value;
+        });
+
+        if (!Object.keys(structuredData).length) {
+          const sectionHeading = Array.from(parsed.querySelectorAll("h2")).find((heading) =>
+            heading.textContent?.toUpperCase().includes(type),
+          );
+          const table = sectionHeading?.nextElementSibling;
+          table?.querySelectorAll("tbody tr").forEach((row) => {
+            const cells = Array.from(row.querySelectorAll("td"));
+            const key = String(cells[0]?.textContent || "").trim();
+            const value = String(cells[2]?.textContent || "").trim();
+            if (schema.fields.some((field) => field.key === key) && value) {
+              structuredData[key] = value;
+            }
+          });
+        }
+
+        return buildStructuredDocument(type, structuredData);
+      })
+      .filter((document) => Object.keys(document.structuredData).length);
   }
 
   function getDocumentRequirements(workType, isEmergency = state.isEmergencyPermit) {
@@ -2897,8 +3007,8 @@
     elements.detailList.innerHTML = detailRows(permit);
     elements.detailList.querySelector("[data-detail-mos-jsa-export]")?.addEventListener("click", () => {
       downloadPermitMosJsaExcel(permit)
-        .then(() => showToast("MOS/JSA Excel exported."))
-        .catch((error) => showToast(error.message || "Unable to export MOS/JSA Excel."));
+        .then(() => showToast("MOS/JSA document exported."))
+        .catch((error) => showToast(error.message || "Unable to export MOS/JSA document."));
     });
     elements.permitDetailDialog.showModal();
   }
@@ -3078,7 +3188,7 @@
         <div class="detail-digital-evidence">
           <div class="detail-digital-evidence-head">
             <span>${documents.length}/2 forms completed</span>
-            <button class="detail-export-button" type="button" data-detail-mos-jsa-export>Export Excel</button>
+            <button class="detail-export-button" type="button" data-detail-mos-jsa-export>Export Document</button>
           </div>
           <div class="detail-digital-evidence-grid">
             ${documents.map(renderStructuredDocumentDetail).join("")}
@@ -3202,6 +3312,15 @@
     render();
   }
 
+  function applySummaryFilter(filter) {
+    if (!["draft", "pending", "active", "rejected"].includes(filter)) return;
+
+    state.activeView = "dashboard";
+    state.activeFilter = filter;
+    render();
+    document.querySelector(".panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   function handleTableAction(button) {
     const id = button.dataset.id;
     const operation = button.dataset.operation;
@@ -3295,6 +3414,15 @@
 
     document.querySelectorAll("[data-view]").forEach((button) => {
       button.addEventListener("click", () => setView(button.dataset.view));
+    });
+
+    document.querySelectorAll("[data-summary-filter]").forEach((card) => {
+      card.addEventListener("click", () => applySummaryFilter(card.dataset.summaryFilter));
+      card.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        applySummaryFilter(card.dataset.summaryFilter);
+      });
     });
 
     elements.tableBody.addEventListener("click", (event) => {

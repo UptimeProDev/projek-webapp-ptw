@@ -1,7 +1,32 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const SITE_VALIDATION_STORAGE_KEY = 'ptwSafetySiteValidationChecklists';
-  const WORK_STATE_STORAGE_KEY = 'ptwSupervisorWorkStates';
-  const COMPLETION_STORAGE_KEY = 'ptwWorkerCompletionRequests';
+  function storageScope() {
+    const stored = localStorage.getItem('ptwSession') || sessionStorage.getItem('ptwSession');
+
+    try {
+      const session = stored ? JSON.parse(stored) : null;
+      const user = session?.user || {};
+      const rawScope =
+        user.organizationId ||
+        user.companyRegistrationNo ||
+        user.organization ||
+        'global';
+      return String(rawScope)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'global';
+    } catch {
+      return 'global';
+    }
+  }
+
+  function scopedStorageKey(key) {
+    return `${key}:${storageScope()}`;
+  }
+
+  const SITE_VALIDATION_STORAGE_KEY = scopedStorageKey('ptwSafetySiteValidationChecklists');
+  const WORK_STATE_STORAGE_KEY = scopedStorageKey('ptwSupervisorWorkStates');
+  const COMPLETION_STORAGE_KEY = scopedStorageKey('ptwWorkerCompletionRequests');
 
   const elements = {
     navItems: Array.from(document.querySelectorAll('.nav-item')),
@@ -515,7 +540,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    const stateName = String(state.workStates?.[permit.id]?.state || '').toLowerCase();
+    const stateName = String(permit.workState || permit.work_state || state.workStates?.[permit.id]?.state || '').toLowerCase();
     if (stateName === 'held') return { key: 'hold', label: 'Hold' };
     if (stateName === 'stopped') return { key: 'stop', label: 'Stop' };
     if (stateName === 'resumed') return { key: 'resume', label: 'Resume' };
@@ -652,10 +677,12 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
   }
 
-  function renderPermitDetail(permit) {
+  function renderPermitDetail(permit, preferredStageIndex = null) {
     const stage = getWorkflowStage(permit);
     const condition = workCondition(permit);
-    const initialStageIndex = getInitialSafetyReviewStage(permit);
+    const initialStageIndex = Number.isInteger(preferredStageIndex)
+      ? preferredStageIndex
+      : getInitialSafetyReviewStage(permit);
 
     elements.permitDetail.innerHTML = `
       <div class="detail-head">
@@ -803,6 +830,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (permit.status === 'stage1_complete') return 3;
     if (permit.status === 'approved' || permit.status === 'rejected' || permit.status === 'active' || permit.status === 'closed') return 4;
     return 0;
+  }
+
+  function getActiveSafetyReviewStageIndex() {
+    const panels = Array.from(elements.permitDetail.querySelectorAll('[data-safety-stage-panel]'));
+    const activeIndex = panels.findIndex((panel) => panel.classList.contains('active'));
+    return activeIndex >= 0 ? activeIndex : null;
   }
 
   function wireSafetyReviewStages(root) {
@@ -1133,7 +1166,7 @@ document.addEventListener('DOMContentLoaded', () => {
         actualWorkDate: fields.actualWorkDate,
         location: fields.location,
         attendance: fields.attendance,
-        updatedAt: new Date().toISOString(),
+        updatedAt: window.PTWTime?.iso?.() || new Date().toISOString(),
       },
     };
     updatePermitSiteValidationState(permit.id, state.siteValidationChecklists[permit.id]);
@@ -1534,14 +1567,15 @@ document.addEventListener('DOMContentLoaded', () => {
       [checklist.key]: {
         checked,
         notes: elements.siteChecklistDialogContent.querySelector('#siteChecklistNotes')?.value.trim() || '',
-        updatedAt: new Date().toISOString(),
+        updatedAt: window.PTWTime?.iso?.() || new Date().toISOString(),
       },
     };
     updatePermitSiteValidationState(permit.id, state.siteValidationChecklists[permit.id]);
     persistStoredObject(SITE_VALIDATION_STORAGE_KEY, state.siteValidationChecklists);
     await saveSiteValidationToServer(permit);
+    const activeStageIndex = getActiveSafetyReviewStageIndex();
     closeSiteChecklistDialog();
-    renderPermitDetail(state.permits.find((item) => item.id === permit.id) || permit);
+    renderPermitDetail(state.permits.find((item) => item.id === permit.id) || permit, activeStageIndex);
     showDecisionMessage(`${checklist.title} checklist completed.`, false);
   }
 
@@ -1963,6 +1997,15 @@ document.addEventListener('DOMContentLoaded', () => {
   function wireEvents() {
     elements.navItems.forEach((item) => {
       item.addEventListener('click', () => setView(item.dataset.view));
+    });
+    document.querySelectorAll('[data-summary-view]').forEach((card) => {
+      const openSummaryView = () => setView(card.dataset.summaryView);
+      card.addEventListener('click', openSummaryView);
+      card.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        openSummaryView();
+      });
     });
     elements.searchInput.addEventListener('input', renderQueue);
     elements.refreshButton.addEventListener('click', () => refresh());

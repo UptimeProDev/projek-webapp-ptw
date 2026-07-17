@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PTW SafetyGuard</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/style.css?v=8" />
+  <link rel="stylesheet" href="/style.css?v=17" />
 </head>
 <body>
     <main class="auth-shell" data-mode="signup">
@@ -13,8 +13,7 @@
         <div class="visual-shade"></div>
         <div class="visual-inner">
           <div class="visual-logo">
-            <img src="/assets/ptw-guardian-login-v2.png" alt="PTW Guardian" />
-            <p>Permit To Work Safety Access</p>
+            <img src="/assets/ptw-guardian-brandmark-v3.png" alt="PTW Guardian" />
           </div>
 
           <div class="visual-copy">
@@ -28,10 +27,10 @@
 
           <div class="visual-metrics" id="visualMetrics">
             <div>
-              <span>ISO 27001 Certified</span>
+              <span>Active Sites</span><strong>142</strong>
             </div>
             <div>
-              <span>256-bit Encryption</span>
+              <span>Compliance Rate</span><strong>99.9%</strong>
             </div>
           </div>
         </div>
@@ -45,7 +44,7 @@
             <button type="button" data-switch="login">Sign In</button>
           </div>
 
-          <form class="auth-form" id="signupForm" autocomplete="on">
+          <form class="auth-form" id="signupForm" autocomplete="on" data-signup-step="1">
             <div class="form-heading">
               <h2>Sign Up</h2>
               <p>
@@ -53,136 +52,154 @@
               </p>
             </div>
 
-            <label class="field">
-              <span>Admin Full Name</span>
-              <span class="input-wrap">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M20 21a8 8 0 0 0-16 0" />
-                  <circle cx="12" cy="7" r="4" />
-                </svg>
-                <input
-                  name="fullName"
-                  type="text"
-                  placeholder="Enter admin full name"
-                  autocomplete="name"
-                  required
-                />
-              </span>
-            </label>
-
-            <label class="field">
-              <span>Admin Work Email</span>
-              <span class="input-wrap">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <rect x="3" y="5" width="18" height="14" rx="2" />
-                  <path d="m3 7 9 6 9-6" />
-                </svg>
-                <input
-                  name="email"
-                  type="email"
-                  placeholder="name@company.com"
-                  autocomplete="email"
-                  required
-                />
-              </span>
-            </label>
-
-            <label class="field">
-              <span>Organization / Contractor Entity</span>
-              <span class="input-wrap">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M4 21V5h8v16" />
-                  <path d="M12 9h8v12" />
-                  <path d="M8 9h1M8 13h1M8 17h1M16 13h1M16 17h1" />
-                </svg>
-                <input
-                  name="organization"
-                  type="text"
-                  placeholder="e.g. Chevron / Global Engineering"
-                  autocomplete="organization"
-                  required
-                />
-              </span>
-            </label>
-
-            <label class="field">
-              <span>Company Registration No. / Contractor ID</span>
-              <span class="input-wrap">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <rect x="4" y="4" width="16" height="16" rx="2" />
-                  <path d="M8 8h8M8 12h8M8 16h5" />
-                </svg>
-                <input
-                  name="companyRegistrationNo"
-                  type="text"
-                  placeholder="e.g. SSM-2026-001 / CTR-1042"
-                  autocomplete="organization-title"
-                  required
-                />
-              </span>
-            </label>
-
-            <label class="field">
-              <span>Password</span>
-              <span class="input-wrap">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <rect x="5" y="11" width="14" height="10" rx="2" />
-                  <path d="M8 11V8a4 4 0 0 1 8 0v3" />
-                </svg>
-                <input
-                  id="signupPassword"
-                  name="password"
-                  type="password"
-                  placeholder="Create a secure password"
-                  autocomplete="new-password"
-                  minlength="8"
-                  required
-                />
-              </span>
-            </label>
-
-            <div class="password-meter" aria-hidden="true">
-              <span id="passwordMeterBar"></span>
-              <small id="passwordMeterText">Enter password</small>
+            <div class="signup-progress" aria-label="Sign up progress">
+              <span class="is-active" data-step-indicator="1">Organization details</span>
+              <span data-step-indicator="2">Security setup</span>
             </div>
 
-            <label class="field">
-              <span>Confirm Password</span>
-              <span class="input-wrap">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <rect x="5" y="11" width="14" height="10" rx="2" />
-                  <path d="M8 11V8a4 4 0 0 1 8 0v3" />
-                  <path d="m9 16 2 2 4-5" />
-                </svg>
-                <input
-                  id="signupConfirmPassword"
-                  name="confirmPassword"
-                  type="password"
-                  placeholder="Confirm your password"
-                  autocomplete="new-password"
-                  minlength="8"
-                  required
-                />
-              </span>
-            </label>
+            <div class="signup-step is-active" data-step-panel="1">
+              <div class="signup-grid">
+                <label class="field">
+                  <span>Admin Full Name</span>
+                  <span class="input-wrap">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M20 21a8 8 0 0 0-16 0" />
+                      <circle cx="12" cy="7" r="4" />
+                    </svg>
+                    <input
+                      name="fullName"
+                      type="text"
+                      placeholder="Full name"
+                      autocomplete="name"
+                      required
+                    />
+                  </span>
+                </label>
 
-            <label class="check-row">
-              <input name="acceptTerms" type="checkbox" required />
-              <span>
-                I agree to the <strong>Terms & Conditions</strong> and
-                acknowledge the <strong>Safety Compliance Standards</strong>.
-              </span>
-            </label>
+                <label class="field">
+                  <span>Admin Work Email</span>
+                  <span class="input-wrap">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <rect x="3" y="5" width="18" height="14" rx="2" />
+                      <path d="m3 7 9 6 9-6" />
+                    </svg>
+                    <input
+                      name="email"
+                      type="email"
+                      placeholder="Email"
+                      autocomplete="email"
+                      required
+                    />
+                  </span>
+                </label>
 
-            <p class="form-message" id="signupMessage" role="status"></p>
+                <label class="field">
+                  <span>Organization / Contractor Entity</span>
+                  <span class="input-wrap">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M4 21V5h8v16" />
+                      <path d="M12 9h8v12" />
+                      <path d="M8 9h1M8 13h1M8 17h1M16 13h1M16 17h1" />
+                    </svg>
+                    <input
+                      name="organization"
+                      type="text"
+                      placeholder="Company"
+                      autocomplete="organization"
+                      required
+                    />
+                  </span>
+                </label>
 
-            <button class="primary-button" type="submit">
-              <span>Sign Up</span>
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M5 12h14" />
-                <path d="m13 6 6 6-6 6" />
-              </svg>
-            </button>
+                <label class="field">
+                  <span>Company Registration No. / Contractor ID</span>
+                  <span class="input-wrap">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <rect x="4" y="4" width="16" height="16" rx="2" />
+                      <path d="M8 8h8M8 12h8M8 16h5" />
+                    </svg>
+                    <input
+                      name="companyRegistrationNo"
+                      type="text"
+                      placeholder="Registration No."
+                      autocomplete="organization-title"
+                      required
+                    />
+                  </span>
+                </label>
+              </div>
+
+              <button class="primary-button" type="button" id="signupNextButton">
+                <span>Next</span>
+              </button>
+            </div>
+
+            <div class="signup-step" data-step-panel="2" hidden>
+              <div class="signup-grid">
+                <label class="field">
+                  <span>Password</span>
+                  <span class="input-wrap">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <rect x="5" y="11" width="14" height="10" rx="2" />
+                      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+                    </svg>
+                    <input
+                      id="signupPassword"
+                      name="password"
+                      type="password"
+                      placeholder="Create a secure password"
+                      autocomplete="new-password"
+                      minlength="8"
+                      required
+                    />
+                  </span>
+                </label>
+
+                <label class="field">
+                  <span>Confirm Password</span>
+                  <span class="input-wrap">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <rect x="5" y="11" width="14" height="10" rx="2" />
+                      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+                      <path d="m9 16 2 2 4-5" />
+                    </svg>
+                    <input
+                      id="signupConfirmPassword"
+                      name="confirmPassword"
+                      type="password"
+                      placeholder="Confirm your password"
+                      autocomplete="new-password"
+                      minlength="8"
+                      required
+                    />
+                  </span>
+                </label>
+              </div>
+
+              <div class="password-meter" aria-hidden="true">
+                <span id="passwordMeterBar"></span>
+                <small id="passwordMeterText">Enter password</small>
+              </div>
+
+              <label class="check-row">
+                <input name="acceptTerms" type="checkbox" required />
+                <span>
+                  I agree to the <strong>Terms & Conditions</strong> and
+                  acknowledge the <strong>Safety Compliance Standards</strong>.
+                </span>
+              </label>
+
+              <p class="form-message" id="signupMessage" role="status"></p>
+
+              <div class="step-actions">
+                <button class="secondary-button" type="button" id="signupBackButton">
+                  <span>Back</span>
+                </button>
+                <button class="primary-button" type="submit">
+                  <span>Sign Up</span>
+                </button>
+              </div>
+            </div>
 
             <div class="form-divider"></div>
 
@@ -319,6 +336,7 @@
         </footer>
       </section>
   </main>
-  <script src="/app.js?v=9"></script>
+  <script src="/ptw-runtime.js?v=1"></script>
+  <script src="/app.js?v=14"></script>
 </body>
 </html>

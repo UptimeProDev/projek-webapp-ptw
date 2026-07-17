@@ -6,7 +6,7 @@
   <title>Admin Lane 2 | PTW Guardian</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/ptw-flow.css?v=2" />
-  <link rel="stylesheet" href="/admin.css?v=lane2-16" />
+  <link rel="stylesheet" href="/admin.css?v=lane2-23" />
   </head>
 <body>
   <div class="app-shell">
@@ -17,12 +17,13 @@
         <span></span>
       </button>
       <div class="brand">
-        <img class="brand-logo" src="/assets/ptw-guardian-login-v2.png" alt="PTW Guardian" />
+        <img class="brand-logo" src="/assets/ptw-guardian-brandmark-v3.png" alt="PTW Guardian" />
       </div>
 
       <nav class="nav">
         <button class="nav-item active" type="button">Worker Review</button>
         <button class="nav-item" type="button">Draft Review</button>
+        <button class="nav-item" type="button">Permit History</button>
         <button class="nav-item" type="button">Audit Trails</button>
       </nav>
 
@@ -34,10 +35,23 @@
 
     <main class="main">
       <header class="topbar">
-        <div class="search">
-          <input id="searchInput" type="search" aria-label="Search admin records" placeholder="Search workers, drafts, or audit records...">
+        <div class="page-title">
+          <h2>Admin Command Center</h2>
         </div>
-        <div class="topbar-actions">
+
+        <label class="search search-box">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 19.6-5.4-5.4a7.6 7.6 0 1 0-1.4 1.4L19.6 21 21 19.6ZM4 10a6 6 0 1 1 12 0 6 6 0 0 1-12 0Z"/></svg>
+          <input id="searchInput" type="search" aria-label="Search admin records" placeholder="Search workers, drafts, or audit records...">
+        </label>
+
+        <button class="icon-button" type="button" id="topbarRefreshButton" aria-label="Refresh admin data">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h8V3l-3.3 3.3Z" />
+          </svg>
+        </button>
+
+        <div class="topbar-divider" aria-hidden="true"></div>
+
           <div class="notification-wrap">
             <button class="icon-button" type="button" id="notificationButton" aria-label="Open notifications" aria-expanded="false" aria-controls="notificationPanel">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -56,19 +70,14 @@
               <div class="notification-list" id="notificationList"></div>
             </div>
           </div>
-          <button class="icon-button" type="button" id="topbarRefreshButton" aria-label="Refresh admin data">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h8V3l-3.3 3.3Z" />
-            </svg>
+
+          <button class="profile profile-button" type="button" id="accountButton" aria-label="Open account settings">
+            <span class="profile-copy profile-info">
+              <strong class="profile-name">Admin User</strong>
+              <span class="profile-role">Admin - Lane 2</span>
+            </span>
+            <span class="avatar profile-avatar">AD</span>
           </button>
-          <button class="profile" type="button" id="accountButton" aria-label="Open account settings">
-            <div class="profile-info">
-              <div class="profile-name">Admin User</div>
-              <div class="profile-role">Admin - Lane 2</div>
-            </div>
-            <div class="avatar">AD</div>
-          </button>
-        </div>
       </header>
 
       <section class="workspace">
@@ -109,17 +118,6 @@
             </span>
           </label>
           <button class="btn small secondary" id="clearFiltersButton" type="button">Clear filters</button>
-        </div>
-
-        <div class="stats">
-          <div class="stat-card critical">
-            <div class="stat-label">INVALID WORKERS</div>
-            <div class="stat-value"><span class="kpi" data-kpi="expired_licenses_count">0</span> <span class="muted small">Critical</span></div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">DRAFT REVIEW QUEUE</div>
-            <div class="stat-value"><span class="kpi" data-kpi="verification_queue_count">0</span> <span class="muted small">Admin check</span></div>
-          </div>
         </div>
 
         <div class="auth-warning hidden" id="adminWarning">
@@ -209,6 +207,23 @@
                   <div id="routingItems" class="queue-items"></div>
                 </div>
                 <div class="queue-detail" id="routingDetail"></div>
+              </div>
+            </section>
+
+            <section id="permitHistorySection" class="section-panel hidden">
+              <div class="detail-card permit-history-shell">
+                <div class="list-head">
+                  <div>
+                    <h3>Permit Review History</h3>
+                    <p class="muted">Track permit movement from requester draft through Admin, Safety Officer, Supervisor, Worker, and closure stages.</p>
+                  </div>
+                  <span class="badge pending" id="permitHistoryCount">0 permits</span>
+                </div>
+                <div class="permit-history-grid" id="permitHistoryBody"></div>
+                <div class="empty-state hidden" id="permitHistoryEmpty" role="status" aria-live="polite">
+                  <strong>No permit history</strong>
+                  <p class="muted">Permit timeline records will appear here after permits are created.</p>
+                </div>
               </div>
             </section>
 
@@ -342,6 +357,7 @@
     </form>
   </dialog>
 
+  <script src="/ptw-runtime.js?v=1"></script>
   <script src="/role-switcher.js?v=4"></script>
   <script src="/admin.js?v=lane2-28"></script>
 </body>

@@ -1,6 +1,31 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const COMPLETION_STORAGE_KEY = 'ptwWorkerCompletionRequests';
-  const WORK_STATE_STORAGE_KEY = 'ptwSupervisorWorkStates';
+  function storageScope() {
+    const stored = localStorage.getItem('ptwSession') || sessionStorage.getItem('ptwSession');
+
+    try {
+      const session = stored ? JSON.parse(stored) : null;
+      const user = session?.user || {};
+      const rawScope =
+        user.organizationId ||
+        user.companyRegistrationNo ||
+        user.organization ||
+        'global';
+      return String(rawScope)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'global';
+    } catch {
+      return 'global';
+    }
+  }
+
+  function scopedStorageKey(key) {
+    return `${key}:${storageScope()}`;
+  }
+
+  const COMPLETION_STORAGE_KEY = scopedStorageKey('ptwWorkerCompletionRequests');
+  const WORK_STATE_STORAGE_KEY = scopedStorageKey('ptwSupervisorWorkStates');
 
   const elements = {
     searchInput: document.querySelector('#searchInput'),
@@ -18,6 +43,8 @@ document.addEventListener('DOMContentLoaded', () => {
     routingItems: document.querySelector('#routingItems'),
     routingCount: document.querySelector('#routingCount'),
     routingDetail: document.querySelector('#routingDetail'),
+    permitHistoryBody: document.querySelector('#permitHistoryBody'),
+    permitHistoryCount: document.querySelector('#permitHistoryCount'),
     auditBody: document.querySelector('#auditBody'),
     auditCount: document.querySelector('#auditCount'),
     refreshButton: document.querySelector('#refreshButton'),
@@ -68,6 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
     competency: document.querySelector('#manageCompetencySection'),
     draftReview: document.querySelector('#permitQueueSection'),
     routing: document.querySelector('#permitClosureSection'),
+    permitHistory: document.querySelector('#permitHistorySection'),
     auditTrails: document.querySelector('#auditTrailsSection'),
   };
 
@@ -75,11 +103,13 @@ document.addEventListener('DOMContentLoaded', () => {
     session: readSession(),
     workers: [],
     permits: [],
+    permitLogs: {},
     audits: [],
     notifications: [],
     completionRequests: readStoredObject(COMPLETION_STORAGE_KEY),
     activeSection: 'competency',
     activeReviewWorkerId: '',
+    activeHistoryPermitId: '',
   };
 
   const workerPermitTypes = [
@@ -180,12 +210,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function setPermitWorkState(permitId, stateName) {
     const workStates = readStoredObject(WORK_STATE_STORAGE_KEY);
+    const updatedAt = window.PTWTime?.iso?.() || new Date().toISOString();
     workStates[permitId] = {
       state: stateName,
-      updatedAt: new Date().toISOString(),
+      updatedAt,
       by: state.session?.user?.email || '',
     };
     persistStoredObject(WORK_STATE_STORAGE_KEY, workStates);
+    state.permits = state.permits.map((permit) =>
+      permit.id === permitId ? { ...permit, workState: stateName } : permit,
+    );
+    apiRequest(`/api/permits/${encodeURIComponent(permitId)}/work-state`, {
+      method: 'PATCH',
+      body: JSON.stringify({ workState: stateName }),
+    })
+      .then((result) => {
+        if (!result?.permit) return;
+        state.permits = state.permits.map((permit) =>
+          permit.id === result.permit.id ? result.permit : permit,
+        );
+      })
+      .catch(() => {});
   }
 
   function pruneCompletionRequests(requests, permits) {
@@ -862,9 +907,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function statusBadge(status) {
     const normalized = String(status || '').toLowerCase();
-    if (['valid', 'approved', 'active'].includes(normalized)) return 'valid';
+    if (['valid', 'approved', 'active', 'closed'].includes(normalized)) return 'valid';
     if (['submitted', 'resubmitted', 'stage1_complete'].includes(normalized)) return 'pending';
-    if (['expired', 'rejected', 'returned', 'inactive'].includes(normalized)) return 'danger';
+    if (['expired', 'rejected', 'returned', 'inactive', 'cancelled'].includes(normalized)) return 'danger';
     if (['expiring', 'warning', 'draft'].includes(normalized)) return 'warn';
     return 'pending';
   }
@@ -996,6 +1041,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     state.workers = workerResult.workers || workerResult.data || [];
     state.permits = permitResult.permits || permitResult.data || [];
+    state.permitLogs = await loadPermitLogs(state.permits);
     state.notifications = notificationResult.notifications || notificationResult.data || [];
     const storedCompletionRequests = readStoredObject(COMPLETION_STORAGE_KEY);
     state.completionRequests = pruneCompletionRequests(storedCompletionRequests, state.permits);
@@ -1012,6 +1058,21 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch {
       return { notifications: [] };
     }
+  }
+
+  async function loadPermitLogs(permits = []) {
+    const entries = await Promise.all(
+      permits.map(async (permit) => {
+        try {
+          const result = await apiRequest(`/api/permits/${encodeURIComponent(permit.id)}/audit-logs`);
+          return [permit.id, result.logs || result.data || []];
+        } catch {
+          return [permit.id, []];
+        }
+      }),
+    );
+
+    return Object.fromEntries(entries);
   }
 
   function syncRequesterWorkersStorage() {
@@ -1032,7 +1093,7 @@ document.addEventListener('DOMContentLoaded', () => {
       qualifications: normalizeWorkerPermits(worker.permits),
       certifications: normalizeWorkerCertifications(worker.certifications),
     }));
-    localStorage.setItem('ptwRequesterWorkers', JSON.stringify(requesterWorkers));
+    localStorage.setItem(scopedStorageKey('ptwRequesterWorkers'), JSON.stringify(requesterWorkers));
   }
 
   function addAudit(action, status = 'Completed') {
@@ -1060,11 +1121,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const titles = {
       competency: 'Worker Profile Review',
       draftReview: 'Review Draft Permits',
+      permitHistory: 'Permit Review History',
       auditTrails: 'Admin Audit Trail',
     };
     const subtitles = {
       competency: 'Review requester-submitted worker profiles, certifications, and permit authorization records.',
       draftReview: 'Clerically verify draft package completeness and formally submit to pending approval.',
+      permitHistory: 'Track each permit movement from draft creation through review, approval, active work, and closure.',
       auditTrails: 'Track Lane 2 administrative actions and final closure history.',
     };
 
@@ -1612,6 +1675,214 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function timeValue(value) {
+    const parsed = Date.parse(value || '');
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+
+  function permitHistoryTitle(status, action = '') {
+    const normalizedStatus = String(status || '').toLowerCase();
+    const normalizedAction = String(action || '').toLowerCase();
+
+    if (normalizedAction === 'created') return 'Draft Created';
+    if (normalizedAction === 'details updated') {
+      return normalizedStatus === 'resubmitted'
+        ? 'Requester Updated and Resubmitted'
+        : 'Permit Details Updated';
+    }
+    if (normalizedAction === 'extension requested') return 'Extension Requested';
+    if (normalizedAction === 'extension reviewed') return 'Extension Reviewed';
+
+    const labels = {
+      draft: 'Draft Created',
+      submitted: 'Sent to Safety Officer Review',
+      resubmitted: 'Requester Resubmitted',
+      stage1_complete: 'Safety Officer MOS/JSA Complete',
+      approved: 'Supervisor Final Approval',
+      active: 'Work Active',
+      rejected: 'Returned for Correction',
+      cancelled: 'Permit Cancelled',
+      closed: 'Permit Closed',
+    };
+
+    return labels[normalizedStatus] || formatStatus(status || action || 'Updated');
+  }
+
+  function formatHistoryActor(log) {
+    const actor = log?.by || 'System';
+    const role = log?.byRole ? formatStatus(log.byRole) : '';
+    return role ? `${actor} - ${role}` : actor;
+  }
+
+  function buildPermitHistoryEvents(permit) {
+    const logs = Array.isArray(state.permitLogs[permit.id]) ? state.permitLogs[permit.id] : [];
+    const events = logs
+      .map((log) => {
+        const transition = [log.from ? formatStatus(log.from) : '', log.status ? formatStatus(log.status) : '']
+          .filter(Boolean)
+          .join(' to ');
+
+        return {
+          time: log.when,
+          title: permitHistoryTitle(log.status, log.action),
+          actor: formatHistoryActor(log),
+          detail: log.comment || transition || formatStatus(log.action || ''),
+          status: log.status || permit.status,
+        };
+      })
+      .filter((event) => event.title);
+
+    const hasCreatedEvent = events.some((event) => event.title === 'Draft Created');
+    if (!hasCreatedEvent && permit.createdAt) {
+      events.unshift({
+        time: permit.createdAt,
+        title: 'Draft Created',
+        actor: permit.requestedBy || 'Requester',
+        detail: 'Permit created as draft',
+        status: 'draft',
+      });
+    }
+
+    const currentStatus = String(permit.status || '').toLowerCase();
+    const hasCurrentStatus = events.some((event) => String(event.status || '').toLowerCase() === currentStatus);
+    if (currentStatus && !hasCurrentStatus && permit.updatedAt) {
+      events.push({
+        time: permit.updatedAt,
+        title: permitHistoryTitle(currentStatus),
+        actor: 'PTW Guardian',
+        detail: 'Current permit status',
+        status: currentStatus,
+      });
+    }
+
+    return events.sort((a, b) => timeValue(a.time) - timeValue(b.time));
+  }
+
+  function renderPermitHistoryDetail(permit) {
+    const events = buildPermitHistoryEvents(permit);
+    const latestEvent = events[events.length - 1] || {};
+
+    return `
+      <article class="permit-history-card permit-history-detail-card">
+        <div class="permit-history-card-head">
+          <div>
+            <span class="permit-history-id">${escapeHtml(formatPermitRouteId(permit))}</span>
+            <h4>${escapeHtml(permit.title || 'Untitled permit')}</h4>
+            <p class="muted">${escapeHtml(permit.location || '-')} - ${escapeHtml(getPermitType(permit))}</p>
+          </div>
+          <span class="badge ${statusBadge(permit.status)}">${escapeHtml(formatStatus(permit.status))}</span>
+        </div>
+
+        <div class="permit-history-meta">
+          <div>
+            <span>Requester</span>
+            <strong>${escapeHtml(permit.requestedBy || '-')}</strong>
+          </div>
+          <div>
+            <span>Created</span>
+            <strong>${escapeHtml(formatDateTime(permit.createdAt))}</strong>
+          </div>
+          <div>
+            <span>Latest movement</span>
+            <strong>${escapeHtml(formatDateTime(latestEvent.time || permit.updatedAt))}</strong>
+          </div>
+        </div>
+
+        <ol class="permit-history-timeline">
+          ${events.map((event, index) => `
+            <li class="permit-history-event ${index === events.length - 1 ? 'is-current' : ''}">
+              <i aria-hidden="true"></i>
+              <div>
+                <strong>${escapeHtml(event.title)}</strong>
+                <span>${escapeHtml(event.actor)} - ${escapeHtml(formatDateTime(event.time))}</span>
+                ${event.detail ? `<p>${escapeHtml(event.detail)}</p>` : ''}
+              </div>
+            </li>
+          `).join('')}
+        </ol>
+      </article>
+    `;
+  }
+
+  function renderPermitHistory(query = '') {
+    if (!elements.permitHistoryBody) return;
+
+    const lowerQuery = query.trim().toLowerCase();
+    const permits = [...state.permits]
+      .sort((a, b) => timeValue(b.updatedAt || b.createdAt) - timeValue(a.updatedAt || a.createdAt));
+    const visible = permits.filter((permit) => {
+      const events = buildPermitHistoryEvents(permit);
+      const searchable = [
+        permit.id,
+        permit.title,
+        permit.location,
+        permit.requestedBy,
+        permit.status,
+        getPermitType(permit),
+        ...events.flatMap((event) => [event.title, event.actor, event.detail, event.status]),
+      ].join(' ').toLowerCase();
+
+      return !lowerQuery || searchable.includes(lowerQuery);
+    });
+
+    const emptyState = document.querySelector('#permitHistoryEmpty');
+    emptyState?.classList.toggle('hidden', visible.length > 0);
+    if (elements.permitHistoryCount) {
+      elements.permitHistoryCount.textContent = `${visible.length} permit${visible.length === 1 ? '' : 's'}`;
+    }
+
+    if (!visible.length) {
+      state.activeHistoryPermitId = '';
+      elements.permitHistoryBody.innerHTML = '';
+      return;
+    }
+
+    const activeStillVisible = visible.some((permit) => permit.id === state.activeHistoryPermitId);
+    if (!activeStillVisible) {
+      state.activeHistoryPermitId = visible[0].id;
+    }
+
+    const selectedPermit = visible.find((permit) => permit.id === state.activeHistoryPermitId) || visible[0];
+
+    elements.permitHistoryBody.innerHTML = `
+      <div class="permit-history-layout">
+        <div class="permit-history-list" aria-label="Permit history list">
+          ${visible.map((permit) => {
+            const events = buildPermitHistoryEvents(permit);
+            const latestEvent = events[events.length - 1] || {};
+            const isSelected = permit.id === selectedPermit.id;
+
+            return `
+              <button class="permit-history-list-item ${isSelected ? 'active' : ''}" type="button" data-history-permit="${escapeHtml(permit.id)}">
+                <span class="permit-history-list-top">
+                  <strong>${escapeHtml(permit.title || 'Untitled permit')}</strong>
+                  <em class="badge ${statusBadge(permit.status)}">${escapeHtml(formatStatus(permit.status))}</em>
+                </span>
+                <span class="permit-history-list-meta">
+                  ${escapeHtml(formatPermitRouteId(permit))} - ${escapeHtml(permit.location || '-')}
+                </span>
+                <span class="permit-history-list-event">
+                  ${escapeHtml(latestEvent.title || permitHistoryTitle(permit.status))} - ${escapeHtml(formatDateTime(latestEvent.time || permit.updatedAt))}
+                </span>
+              </button>
+            `;
+          }).join('')}
+        </div>
+
+        <div class="permit-history-detail">
+          ${renderPermitHistoryDetail(selectedPermit)}
+        </div>
+      </div>
+    `;
+
+    elements.permitHistoryBody.querySelectorAll('[data-history-permit]').forEach((button) => {
+      button.addEventListener('click', () => {
+        state.activeHistoryPermitId = button.dataset.historyPermit;
+        renderPermitHistory(elements.searchInput?.value || '');
+      });
+    });
+  }
+
   function renderAudit(query = '') {
     const lowerQuery = query.trim().toLowerCase();
     const completionRows = Object.values(state.completionRequests)
@@ -1688,7 +1959,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.completionRequests[requestId] = {
         ...request,
         status: 'closed',
-        closedAt: new Date().toISOString(),
+        closedAt: window.PTWTime?.iso?.() || new Date().toISOString(),
         closedBy: state.session?.user?.fullName || 'PTW Admin',
       };
       persistStoredObject(COMPLETION_STORAGE_KEY, state.completionRequests);
@@ -1875,6 +2146,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const query = elements.searchInput?.value || '';
     if (state.activeSection === 'competency') renderCompetency(query);
     if (state.activeSection === 'draftReview') renderQueue(query);
+    if (state.activeSection === 'permitHistory') renderPermitHistory(query);
     if (state.activeSection === 'auditTrails') renderAudit(query);
   }
 
@@ -1886,11 +2158,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function getRequestedSection() {
-    const validSections = new Set(['competency', 'draftReview', 'auditTrails']);
+    const validSections = new Set(['competency', 'draftReview', 'permitHistory', 'auditTrails']);
     const aliases = {
       userRoles: '',
       userManagement: '',
       users: '',
+      history: 'permitHistory',
+      permits: 'permitHistory',
+      permitHistory: 'permitHistory',
     };
     const rawSection =
       new URLSearchParams(window.location.search).get('section') ||
@@ -1900,8 +2175,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function wireEvents() {
+    const sections = ['competency', 'draftReview', 'permitHistory', 'auditTrails'];
     elements.navItems.forEach((item, index) => {
-      item.dataset.section = ['competency', 'draftReview', 'auditTrails'][index];
+      item.dataset.section = sections[index];
       item.addEventListener('click', () => setActiveSection(item.dataset.section));
     });
 
@@ -2058,6 +2334,7 @@ document.addEventListener('DOMContentLoaded', () => {
     await loadData();
     updateKpis();
     renderCompetency();
+    renderPermitHistory();
     renderAudit();
     const requestedSection = getRequestedSection();
     setActiveSection(requestedSection || (getDraftQueue().length ? 'draftReview' : state.activeSection));

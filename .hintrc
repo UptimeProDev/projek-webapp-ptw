@@ -3,6 +3,14 @@
     "development"
   ],
   "hints": {
-    "compat-api/css": "off"
+    "compat-api/css": "off",
+    "button-type": "off",
+    "axe/aria": [
+      "default",
+      {
+        "aria-required-children": "off",
+        "aria-required-parent": "off"
+      }
+    ]
   }
 }

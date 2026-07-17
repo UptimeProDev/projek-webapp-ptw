@@ -11,11 +11,37 @@ const toast = document.querySelector("#toast");
 const inviteDialog = document.querySelector("#inviteDialog");
 const inviteForm = document.querySelector("#inviteForm");
 
+function storageScope() {
+  const stored =
+    localStorage.getItem("ptwSession") || sessionStorage.getItem("ptwSession");
+
+  try {
+    const session = stored ? JSON.parse(stored) : null;
+    const user = session?.user || {};
+    const rawScope =
+      user.organizationId ||
+      user.companyRegistrationNo ||
+      user.organization ||
+      "global";
+    return String(rawScope)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "global";
+  } catch {
+    return "global";
+  }
+}
+
+function scopedStorageKey(key) {
+  return `${key}:${storageScope()}`;
+}
+
 const STORAGE_KEYS = {
-  draft: "ptwRequesterWizardDraft",
-  workers: "ptwRequesterWorkers",
-  permitMeta: "ptwRequesterPermitMeta",
-  offlinePermits: "ptwRequesterOfflinePermits",
+  draft: scopedStorageKey("ptwRequesterWizardDraft"),
+  workers: scopedStorageKey("ptwRequesterWorkers"),
+  permitMeta: scopedStorageKey("ptwRequesterPermitMeta"),
+  offlinePermits: scopedStorageKey("ptwRequesterOfflinePermits"),
 };
 
 const OFFLINE_TOKEN = "offline-demo-requester";

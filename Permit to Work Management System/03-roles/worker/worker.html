@@ -6,7 +6,7 @@
   <title>Worker Portal | PTW Guardian</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/ptw-flow.css?v=2" />
-  <link rel="stylesheet" href="/worker.css?v=10" />
+  <link rel="stylesheet" href="/worker.css?v=17" />
 </head>
 <body>
   <div class="worker-shell">
@@ -17,35 +17,65 @@
         <span></span>
       </button>
       <div class="brand">
-        <img class="brand-logo" src="/assets/ptw-guardian-login-v2.png" alt="PTW Guardian" />
+        <img class="brand-logo" src="/assets/ptw-guardian-brandmark-v3.png" alt="PTW Guardian" />
       </div>
 
       <nav class="worker-nav">
-        <button class="nav-item active" type="button" data-view="dashboard">My Permits</button>
-        <button class="nav-item" type="button" data-view="active">Active Work</button>
-        <button class="nav-item" type="button" data-view="extension">Extension Request</button>
-        <button class="nav-item" type="button" data-view="completion">History</button>
+        <button class="nav-item active" type="button" data-view="dashboard">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h9l5 5v15H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm8 2v4h4l-4-4ZM8 12h8v2H8v-2Zm0 4h8v2H8v-2Z"/></svg>
+          <span>My Permits</span>
+        </button>
+        <button class="nav-item" type="button" data-view="active">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 10 10h-2a8 8 0 1 1-2.34-5.66L13 11h9V2l-2.92 2.92A9.97 9.97 0 0 0 12 2Zm4.7 7.3-5.2 5.2-2.2-2.2-1.4 1.4 3.6 3.6 6.6-6.6-1.4-1.4Z"/></svg>
+          <span>Active Work</span>
+        </button>
+        <button class="nav-item" type="button" data-view="extension">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 10 10h-2a8 8 0 1 1-8-8V2Zm1 5h-2v6l5 3 1-1.7-4-2.3V7Zm7 11v-3h-3v-2h3v-3h2v3h3v2h-3v3h-2Z"/></svg>
+          <span>Extension Request</span>
+        </button>
+        <button class="nav-item" type="button" data-view="completion">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3a9 9 0 1 1-8.95 10H2l3-4 3 4H6.07A7 7 0 1 0 13 5V3Zm-1 4h2v6h-5v-2h3V7Z"/></svg>
+          <span>History</span>
+        </button>
       </nav>
 
       <div class="worker-footer">
-        <button class="nav-item" type="button" onclick="window.location.href='/account'">Account</button>
-        <button class="nav-item" type="button" onclick="window.location.href='/support'">Support</button>
-        <button class="nav-item signout" type="button" id="logoutButton">Logout</button>
+        <button class="nav-item" type="button" onclick="window.location.href='/account'">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Zm0 2c-4.42 0-8 2.24-8 5v1h16v-1c0-2.76-3.58-5-8-5Z"/></svg>
+          <span>Account</span>
+        </button>
+        <button class="nav-item" type="button" onclick="window.location.href='/support'">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 18h2v-2h-2v2Zm1-16a10 10 0 1 0 10 10A10.01 10.01 0 0 0 12 2Zm0 18a8 8 0 1 1 8-8 8.01 8.01 0 0 1-8 8Zm0-14a4 4 0 0 0-4 4h2a2 2 0 1 1 2 2 2 2 0 0 0-2 2v1h2v-1a4 4 0 0 0 0-8Z"/></svg>
+          <span>Support</span>
+        </button>
+        <button class="nav-item signout" type="button" id="logoutButton">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 17v-3H3v-4h7V7l6 5-6 5Zm9-14H9a2 2 0 0 0-2 2v3h2V5h10v14H9v-3H7v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z"/></svg>
+          <span>Logout</span>
+        </button>
       </div>
     </aside>
 
     <main class="worker-main">
       <header class="worker-topbar">
-        <div>
-          <span class="eyebrow">Contractor / Worker Flow</span>
+        <div class="page-title">
           <h2 id="pageTitle">My Assigned Permits</h2>
-          <p id="pageSubtitle">Track permit status, time remaining, extension requests, and work completion.</p>
+          <p id="pageSubtitle" class="header-subtitle">Track permit status, time remaining, extension requests, and work completion.</p>
         </div>
-        <div class="topbar-actions">
-          <label class="search">
-            <span class="sr-only">Search assigned permits</span>
-            <input id="searchInput" type="search" placeholder="Search work type, permit ID, or location" />
-          </label>
+
+        <label class="search search-box">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 19.6-5.4-5.4a7.6 7.6 0 1 0-1.4 1.4L19.6 21 21 19.6ZM4 10a6 6 0 1 1 12 0 6 6 0 0 1-12 0Z"/></svg>
+          <span class="sr-only">Search assigned permits</span>
+          <input id="searchInput" type="search" placeholder="Search work type, permit ID, or location" />
+        </label>
+
+        <button class="icon-button" type="button" id="refreshButton" aria-label="Refresh worker portal">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h8V3l-3.3 3.3Z" />
+          </svg>
+        </button>
+
+        <div class="topbar-divider" aria-hidden="true"></div>
+
           <div class="notification-wrap">
             <button class="icon-button" type="button" id="notificationButton" aria-label="Open notifications" aria-expanded="false" aria-controls="notificationPanel">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -64,19 +94,14 @@
               <div class="notification-list" id="notificationList"></div>
             </div>
           </div>
-          <button class="icon-button" type="button" id="refreshButton" aria-label="Refresh worker portal">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h8V3l-3.3 3.3Z" />
-            </svg>
-          </button>
-          <button class="profile" type="button" id="accountButton" aria-label="Open account settings">
+
+          <button class="profile profile-button" type="button" id="accountButton" aria-label="Open account settings">
             <span class="profile-copy">
               <strong id="profileName">Worker</strong>
               <span id="profileRole">Assigned worker</span>
             </span>
             <span class="profile-avatar" id="profileAvatar">W</span>
           </button>
-        </div>
       </header>
 
       <div class="auth-warning hidden" id="workerWarning">
@@ -87,21 +112,25 @@
 
       <section class="summary-grid" aria-label="Worker summary">
         <article>
+          <svg class="kpi-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10v3h3v15H4V6h3V3Zm2 2v3h6V5H9Zm-2 5v2h10v-2H7Zm0 4v2h10v-2H7Z"/></svg>
           <span>Assigned</span>
           <strong id="assignedCount">0</strong>
           <small>Visible permits</small>
         </article>
         <article>
+          <svg class="kpi-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 10 10h-2a8 8 0 1 1-8-8V2Zm5.7 6.3-7.2 7.2-3.2-3.2-1.4 1.4 4.6 4.6 8.6-8.6-1.4-1.4Z"/></svg>
           <span>Active</span>
           <strong id="activeCount">0</strong>
           <small>Live work</small>
         </article>
         <article class="urgent">
+          <svg class="kpi-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 10 10A10.01 10.01 0 0 0 12 2Zm1 11h5v-2h-4V6h-2v7Z"/></svg>
           <span>Countdown</span>
           <strong id="countdownCount">0</strong>
           <small>Due within one hour</small>
         </article>
         <article>
+          <svg class="kpi-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Zm-8.2 13.6-4-4 1.4-1.4 2.6 2.6 5-5 1.4 1.4-6.4 6.4Z"/></svg>
           <span>Completed</span>
           <strong id="completedCount">0</strong>
           <small>Submitted checklists</small>
@@ -158,7 +187,8 @@
     </main>
   </div>
 
+  <script src="/ptw-runtime.js?v=1"></script>
   <script src="/role-switcher.js?v=4"></script>
-  <script src="/worker.js?v=9"></script>
+  <script src="/worker.js?v=11"></script>
 </body>
 </html>

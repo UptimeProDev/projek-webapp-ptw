@@ -6,7 +6,7 @@
   <title>Supervisor Command Center | PTW Guardian</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/ptw-flow.css?v=2" />
-  <link rel="stylesheet" href="/supervisor.css?v=20" />
+  <link rel="stylesheet" href="/supervisor.css?v=24" />
 </head>
 <body>
   <div class="command-shell">
@@ -17,7 +17,7 @@
         <span></span>
       </button>
       <div class="brand">
-        <img class="brand-logo" src="/assets/ptw-guardian-login-v2.png" alt="PTW Guardian" />
+        <img class="brand-logo" src="/assets/ptw-guardian-brandmark-v3.png" alt="PTW Guardian" />
       </div>
 
       <nav class="nav-list">
@@ -62,11 +62,6 @@
           <span class="sr-only">Search permits, zones, or contractors</span>
           <input id="searchInput" type="search" placeholder="Search Permits or Assets..." />
         </label>
-
-        <div class="system-pill" aria-live="polite">
-          <span></span>
-          <strong>Live Feed</strong>
-        </div>
 
         <button class="icon-button" type="button" id="refreshButton" aria-label="Refresh supervisor data">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h8V3l-3.3 3.3Z"/></svg>
@@ -292,6 +287,7 @@
     <div class="site-checklist-dialog-content" id="siteChecklistDialogContent"></div>
   </dialog>
 
+  <script src="/ptw-runtime.js?v=1"></script>
   <script src="/role-switcher.js?v=4"></script>
   <script src="/supervisor.js?v=24"></script>
 </body>

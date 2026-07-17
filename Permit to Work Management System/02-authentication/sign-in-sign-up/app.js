@@ -19,6 +19,15 @@ const visualTitle = document.querySelector("#visualTitle");
 const visualBody = document.querySelector("#visualBody");
 const visualMetrics = document.querySelector("#visualMetrics");
 const modeToggle = document.querySelector(".mode-toggle");
+const formPanel = document.querySelector(".form-panel");
+const signupNextButton = document.querySelector("#signupNextButton");
+const signupBackButton = document.querySelector("#signupBackButton");
+const signupStepPanels = document.querySelectorAll("[data-step-panel]");
+const signupStepIndicators = document.querySelectorAll("[data-step-indicator]");
+
+if ("scrollRestoration" in history) {
+  history.scrollRestoration = "manual";
+}
 
 const roleLabels = {
   organization_admin: "Organization Admin",
@@ -80,6 +89,10 @@ function setMode(mode) {
   signupMessage.classList.remove("success");
   loginMessage.classList.remove("success");
 
+  if (mode === "signup") {
+    setSignupStep(1);
+  }
+
   if (mode === "login") {
     visualEyebrow.textContent = "";
     visualTitle.textContent = "Industrial Safety Compliance Division.";
@@ -95,14 +108,59 @@ function setMode(mode) {
     visualBody.textContent =
       "Sign up to create your organization workspace, streamline permits, manage compliance, and ensure every worker returns home safely.";
     visualMetrics.innerHTML = `
-      <div><span>ISO 27001 Certified</span></div>
-      <div><span>256-bit Encryption</span></div>
+      <div><span>Active Sites</span><strong>142</strong></div>
+      <div><span>Compliance Rate</span><strong>99.9%</strong></div>
     `;
   }
 
   document.querySelectorAll("[data-switch]").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.switch === mode);
   });
+
+  resetAuthScroll();
+}
+
+function setSignupStep(step) {
+  const nextStep = String(step);
+  signupForm.dataset.signupStep = nextStep;
+  signupStepPanels.forEach((panel) => {
+    const isActive = panel.dataset.stepPanel === nextStep;
+    panel.hidden = !isActive;
+    panel.classList.toggle("is-active", isActive);
+  });
+  signupStepIndicators.forEach((indicator) => {
+    indicator.classList.toggle("is-active", indicator.dataset.stepIndicator === nextStep);
+  });
+  setMessage(signupMessage, "");
+  resetAuthScroll();
+}
+
+function resetAuthScroll() {
+  requestAnimationFrame(() => {
+    formPanel?.scrollTo({ top: 0, behavior: "auto" });
+    window.scrollTo({ top: 0, behavior: "auto" });
+  });
+}
+
+function navigateWithAuthTransition(destination) {
+  document.body.classList.add("is-auth-leaving");
+  window.setTimeout(() => {
+    window.location.href = destination;
+  }, 180);
+}
+
+function validateSignupStep(step) {
+  const fields = Array.from(
+    signupForm.querySelectorAll(`[data-step-panel="${step}"] input`),
+  );
+  const invalidField = fields.find((field) => !field.checkValidity());
+
+  if (invalidField) {
+    invalidField.reportValidity();
+    return false;
+  }
+
+  return true;
 }
 
 function getInitialMode() {
@@ -253,7 +311,7 @@ function setActiveRoleAndRedirect(role) {
 
   const destination = getRoleDestination(role);
   if (destination) {
-    window.location.href = destination;
+    navigateWithAuthTransition(destination);
     return true;
   }
 
@@ -348,8 +406,26 @@ function updatePasswordMeter() {
   }
 }
 
+signupNextButton?.addEventListener("click", () => {
+  if (validateSignupStep(1)) {
+    setSignupStep(2);
+  }
+});
+
+signupBackButton?.addEventListener("click", () => {
+  setSignupStep(1);
+});
+
 signupForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+
+  if (signupForm.dataset.signupStep === "1") {
+    if (validateSignupStep(1)) {
+      setSignupStep(2);
+    }
+    return;
+  }
+
   setBusy(signupForm, true);
   setMessage(signupMessage, "");
 
@@ -379,7 +455,7 @@ signupForm.addEventListener("submit", async (event) => {
 
     setMessage(signupMessage, "Organization registered.", "success");
     saveSession({ ...result, activeRole: "organization_admin" }, true);
-    window.location.href = getAppUrl("organization");
+    navigateWithAuthTransition(getAppUrl("organization"));
   } catch (error) {
     setMessage(signupMessage, getErrorMessage(error));
   } finally {
@@ -435,6 +511,7 @@ logoutButton?.addEventListener("click", async () => {
 });
 
 document.addEventListener("DOMContentLoaded", () => {
+  resetAuthScroll();
   const existingSession = readSession();
   const isAuthRoute = location.pathname === "/login" || location.pathname === "/signup";
 
