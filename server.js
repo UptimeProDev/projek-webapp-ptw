@@ -620,7 +620,7 @@ function extractWordXmlBlocks(xml, tagName) {
 }
 
 function extractWordCellText(cellXml) {
-  return Array.from(String(cellXml || '').matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/gi))
+  return Array.from(String(cellXml || '').matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/gi))
     .map((match) => decodeHtmlEntities(match[1]))
     .join(' ')
     .replace(/\s+/g, ' ')
