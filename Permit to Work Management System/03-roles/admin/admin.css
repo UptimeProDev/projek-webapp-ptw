@@ -3140,3 +3140,105 @@ body::before{
   }
 }
 
+/* Admin header alignment polish: keep the profile pill fully inside the header. */
+.main > .topbar{
+  width:auto;
+  max-width:none;
+  margin:22px clamp(22px,2.8vw,54px) 24px;
+  min-height:96px;
+  padding:18px 24px 18px 28px;
+  display:grid;
+  grid-template-columns:minmax(250px,.8fr) minmax(320px,520px) 58px 1px 58px 244px;
+  align-items:center;
+  gap:16px;
+  overflow:visible;
+}
+
+.main > .topbar .page-title h2{
+  max-width:270px;
+}
+
+.main > .topbar .search-box{
+  width:100%;
+  max-width:520px;
+  justify-self:center;
+}
+
+.main > .topbar .icon-button{
+  width:58px;
+  height:58px;
+  border-radius:20px;
+}
+
+.main > .topbar .topbar-divider{
+  height:54px;
+  justify-self:center;
+}
+
+.main > .topbar button#accountButton.profile.profile-button{
+  width:244px;
+  min-width:0;
+  max-width:244px;
+  height:64px;
+  min-height:64px;
+  padding:7px 8px 7px 18px;
+  justify-self:end;
+  align-self:center;
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:12px;
+  overflow:hidden;
+  border-radius:22px;
+}
+
+.main > .topbar button#accountButton .profile-copy{
+  flex:1 1 auto;
+  min-width:0;
+  max-width:160px;
+}
+
+.main > .topbar button#accountButton .profile-copy strong,
+.main > .topbar button#accountButton .profile-copy span{
+  width:100%;
+  display:block;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.main > .topbar button#accountButton .profile-avatar{
+  width:50px;
+  height:50px;
+  flex:0 0 50px;
+  border-radius:16px;
+}
+
+@media (max-width:1360px){
+  .main > .topbar{
+    grid-template-columns:minmax(220px,.75fr) minmax(260px,1fr) 54px 1px 54px 220px;
+    gap:14px;
+    padding-inline:22px;
+  }
+
+  .main > .topbar button#accountButton.profile.profile-button{
+    width:220px;
+    max-width:220px;
+  }
+}
+
+@media (max-width:1180px){
+  .main > .topbar{
+    margin:18px 0 24px;
+    width:auto;
+    grid-template-columns:1fr;
+    align-items:stretch;
+  }
+
+  .main > .topbar button#accountButton.profile.profile-button{
+    width:100%;
+    max-width:none;
+    justify-self:stretch;
+  }
+}
+

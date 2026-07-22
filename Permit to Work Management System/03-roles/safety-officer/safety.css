@@ -3211,3 +3211,119 @@ input:focus {
     justify-content: space-between;
   }
 }
+
+/* Safety header alignment polish: match the Supervisor/Admin header fit. */
+.safety-topbar {
+  width: auto;
+  max-width: none;
+  margin: 22px clamp(22px, 2.8vw, 54px) 24px;
+  min-height: 96px;
+  padding: 18px 24px 18px 28px;
+  display: grid;
+  grid-template-columns: minmax(250px, 0.8fr) minmax(320px, 520px) 58px 1px 58px 244px;
+  align-items: center;
+  gap: 16px;
+  overflow: visible;
+  box-sizing: border-box;
+}
+
+.safety-topbar .page-title h2 {
+  max-width: 270px;
+}
+
+.safety-topbar .search-box {
+  width: 100%;
+  max-width: 520px;
+  justify-self: center;
+}
+
+.safety-topbar .icon-button {
+  width: 58px;
+  height: 58px;
+  border-radius: 20px;
+}
+
+.safety-topbar .topbar-divider {
+  height: 54px;
+  justify-self: center;
+}
+
+.safety-topbar .profile-button {
+  width: 244px;
+  min-width: 0;
+  max-width: 244px;
+  height: 64px;
+  min-height: 64px;
+  padding: 7px 8px 7px 18px;
+  justify-self: end;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  overflow: hidden;
+  border-radius: 22px;
+  box-sizing: border-box;
+}
+
+.safety-topbar .profile-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 160px;
+  text-align: right;
+}
+
+.safety-topbar .profile-copy strong,
+.safety-topbar .profile-copy span {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.safety-topbar .profile-avatar {
+  width: 50px;
+  height: 50px;
+  min-width: 50px;
+  flex: 0 0 50px;
+  border-radius: 16px;
+}
+
+@media (max-width: 1360px) {
+  .safety-topbar {
+    grid-template-columns: minmax(230px, 0.72fr) minmax(280px, 1fr) 54px 1px 54px 220px;
+    gap: 12px;
+    padding: 16px 20px 16px 24px;
+  }
+
+  .safety-topbar .profile-button {
+    width: 220px;
+    max-width: 220px;
+    padding-left: 14px;
+  }
+
+  .safety-topbar .profile-copy {
+    max-width: 142px;
+  }
+}
+
+@media (max-width: 1180px) {
+  .safety-topbar {
+    width: auto;
+    margin: 18px 0 24px;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .safety-topbar .page-title h2,
+  .safety-topbar .search-box {
+    max-width: none;
+  }
+
+  .safety-topbar .profile-button {
+    width: 100%;
+    max-width: none;
+    justify-self: stretch;
+  }
+}
