@@ -524,6 +524,16 @@ async function parseMosJsaTemplate(attachmentData) {
   ].filter(Boolean);
 }
 
+function decodeDocumentEntities(value) {
+  return String(value || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ');
+}
+
 function documentFieldRows(type, fields, structuredData = {}) {
   return fields
     .map((field) => `
@@ -577,7 +587,7 @@ function createMosJsaDocumentTemplate(documents = []) {
 }
 
 function stripHtml(value) {
-  return decodeHtmlEntities(String(value || '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeDocumentEntities(String(value || '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
 }
 
 function parseDocumentField(html, type, field) {
@@ -621,7 +631,7 @@ function extractWordXmlBlocks(xml, tagName) {
 
 function extractWordCellText(cellXml) {
   return Array.from(String(cellXml || '').matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/gi))
-    .map((match) => decodeHtmlEntities(match[1]))
+    .map((match) => decodeDocumentEntities(match[1]))
     .join(' ')
     .replace(/\s+/g, ' ')
     .trim();
