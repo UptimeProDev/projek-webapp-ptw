@@ -9,10 +9,63 @@ CREATE TABLE IF NOT EXISTS organizations (
   name VARCHAR(255) NOT NULL,
   registration_no VARCHAR(120) NOT NULL UNIQUE,
   admin_user_id CHAR(36),
+  contact_email VARCHAR(255),
+  contact_number VARCHAR(80),
+  registered_address TEXT,
+  primary_contact_name VARCHAR(255),
+  service_tier VARCHAR(80),
+  enabled_modules LONGTEXT,
+  status VARCHAR(40) NOT NULL DEFAULT 'pending',
+  notes TEXT,
+  lifecycle_reason TEXT,
+  archived_at VARCHAR(40),
+  activated_at VARCHAR(40),
   created_at VARCHAR(40) NOT NULL,
   updated_at VARCHAR(40) NOT NULL,
   UNIQUE INDEX idx_organizations_registration_no (registration_no),
   INDEX idx_organizations_admin_user_id (admin_user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS platform_audit_logs (
+  id CHAR(36) PRIMARY KEY,
+  occurred_at VARCHAR(40) NOT NULL,
+  actor_user_id CHAR(36),
+  actor_name VARCHAR(255) NOT NULL,
+  actor_role VARCHAR(50) NOT NULL,
+  organization_id CHAR(36),
+  category VARCHAR(80) NOT NULL,
+  action VARCHAR(120) NOT NULL,
+  target_type VARCHAR(80),
+  target_id VARCHAR(120),
+  previous_value LONGTEXT,
+  new_value LONGTEXT,
+  reason TEXT,
+  ip_address VARCHAR(80),
+  result VARCHAR(40) NOT NULL DEFAULT 'success',
+  INDEX idx_platform_audit_occurred (occurred_at),
+  INDEX idx_platform_audit_org (organization_id),
+  INDEX idx_platform_audit_category (category)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS platform_settings (
+  setting_key VARCHAR(120) PRIMARY KEY,
+  setting_value LONGTEXT,
+  updated_by CHAR(36),
+  updated_at VARCHAR(40) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  id CHAR(36) PRIMARY KEY,
+  user_id CHAR(36) NOT NULL,
+  token VARCHAR(128) NOT NULL UNIQUE,
+  ip_address VARCHAR(80),
+  user_agent VARCHAR(500),
+  created_at VARCHAR(40) NOT NULL,
+  last_seen_at VARCHAR(40) NOT NULL,
+  revoked_at VARCHAR(40),
+  INDEX idx_auth_sessions_user (user_id),
+  INDEX idx_auth_sessions_token (token),
+  INDEX idx_auth_sessions_active (revoked_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS users (
@@ -69,6 +122,8 @@ CREATE TABLE IF NOT EXISTS permits (
   rejection_snapshot_hash VARCHAR(80),
   status VARCHAR(40) NOT NULL,
   work_state VARCHAR(40) NOT NULL DEFAULT 'not_started',
+  timer_paused_at VARCHAR(40),
+  timer_remaining_seconds INT,
   created_at VARCHAR(40) NOT NULL,
   updated_at VARCHAR(40) NOT NULL,
   INDEX idx_permits_organization_id (organization_id),

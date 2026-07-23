@@ -1,0 +1,50 @@
+.password-control {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.password-control input {
+  padding-right: 48px !important;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 7px;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #61738a;
+}
+
+.password-toggle:hover {
+  background: #eef4fb;
+  color: #1763da;
+}
+
+.password-toggle:focus-visible {
+  outline: 3px solid rgba(28, 99, 218, .16);
+  outline-offset: 1px;
+}
+
+.password-toggle svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.password-toggle-slash {
+  display: none;
+}
+
+.password-toggle.is-visible .password-toggle-slash {
+  display: block;
+}

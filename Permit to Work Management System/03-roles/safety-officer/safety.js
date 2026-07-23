@@ -39,8 +39,10 @@ document.addEventListener('DOMContentLoaded', () => {
     notificationButton: document.querySelector('#notificationButton'),
     notificationPanel: document.querySelector('#notificationPanel'),
     notificationCloseButton: document.querySelector('#notificationCloseButton'),
+    notificationReadAllButton: document.querySelector('#notificationReadAllButton'),
     notificationList: document.querySelector('#notificationList'),
     notificationCount: document.querySelector('#notificationCount'),
+    notificationDot: document.querySelector('#notificationDot'),
     refreshButton: document.querySelector('#refreshButton'),
     logoutButton: document.querySelector('#logoutButton'),
     warning: document.querySelector('#safetyWarning'),
@@ -54,6 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
     queueHint: document.querySelector('#queueHint'),
     queueCount: document.querySelector('#queueCount'),
     searchInput: document.querySelector('#searchInput'),
+    searchClearButton: document.querySelector('#searchClearButton'),
     queueItems: document.querySelector('#queueItems'),
     permitDetail: document.querySelector('#permitDetail'),
     siteChecklistDialog: document.querySelector('#siteChecklistDialog'),
@@ -273,14 +276,19 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderNotifications() {
     if (state.notifications.length) {
       const unreadCount = state.notifications.filter((item) => item.unread).length;
+      window.PTWNotifications?.updateBadge(elements.notificationDot, unreadCount);
+      elements.notificationReadAllButton.disabled = unreadCount === 0;
       elements.notificationCount.textContent =
         unreadCount ? `${unreadCount} unread` : state.notifications.length === 1 ? '1 item' : `${state.notifications.length} items`;
       elements.notificationList.innerHTML = state.notifications
         .map((item) => `
           <button class="notification-item" type="button"
             data-notification-id="${escapeHtml(item.id || '')}"
-            data-notification-link="${escapeHtml(item.link || '')}">
-            <span>${escapeHtml(item.type || 'Update')}</span>
+            data-notification-link="${escapeHtml(item.link || '')}"
+            data-notification-type="${escapeHtml(item.type || '')}"
+            data-notification-entity-type="${escapeHtml(item.entityType || '')}"
+            data-notification-entity-id="${escapeHtml(item.entityId || '')}">
+            <span>${escapeHtml(window.PTWNotifications?.typeLabel(item.type) || item.type || 'Update')}</span>
             <strong>${escapeHtml(item.title)}</strong>
             <p>${escapeHtml(item.message || 'PTW update')}</p>
           </button>
@@ -290,6 +298,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const items = safetyNotificationItems();
+    window.PTWNotifications?.updateBadge(elements.notificationDot, 0);
+    elements.notificationReadAllButton.disabled = true;
     elements.notificationCount.textContent = `${items.length} items`;
     elements.notificationList.innerHTML = items
       .map((item) => `
@@ -306,6 +316,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!elements.notificationPanel) return;
     elements.notificationPanel.hidden = !open;
     elements.notificationButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  async function markAllNotificationsRead() {
+    elements.notificationReadAllButton.disabled = true;
+    try {
+      await apiRequest('/api/notifications/read-all', { method: 'PATCH' });
+      state.notifications = state.notifications.map((item) => ({ ...item, unread: false, readAt: new Date().toISOString() }));
+      renderNotifications();
+    } catch {
+      elements.notificationReadAllButton.disabled = false;
+    }
   }
 
   function getUserRoles(user) {
@@ -2007,7 +2028,16 @@ document.addEventListener('DOMContentLoaded', () => {
         openSummaryView();
       });
     });
-    elements.searchInput.addEventListener('input', renderQueue);
+    elements.searchInput.addEventListener('input', () => {
+      elements.searchClearButton.hidden = !elements.searchInput.value;
+      renderQueue();
+    });
+    elements.searchClearButton.addEventListener('click', () => {
+      elements.searchInput.value = '';
+      elements.searchClearButton.hidden = true;
+      elements.searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      elements.searchInput.focus();
+    });
     elements.refreshButton.addEventListener('click', () => refresh());
     elements.accountButton?.addEventListener('click', () => window.location.assign('/account'));
     elements.notificationButton?.addEventListener('click', (event) => {
@@ -2016,11 +2046,15 @@ document.addEventListener('DOMContentLoaded', () => {
       setNotificationPanel(elements.notificationPanel?.hidden);
     });
     elements.notificationCloseButton?.addEventListener('click', () => setNotificationPanel(false));
+    elements.notificationReadAllButton?.addEventListener('click', markAllNotificationsRead);
     elements.notificationList?.addEventListener('click', (event) => {
       const persistentButton = event.target.closest('[data-notification-id]');
       if (persistentButton) {
         const notificationId = persistentButton.dataset.notificationId;
         const link = persistentButton.dataset.notificationLink || '';
+        const type = persistentButton.dataset.notificationType || '';
+        const entityType = persistentButton.dataset.notificationEntityType || '';
+        const entityId = persistentButton.dataset.notificationEntityId || '';
         apiRequest(`/api/notifications/${encodeURIComponent(notificationId)}/read`, { method: 'PATCH' }).catch(() => {});
         state.notifications = state.notifications.map((notification) =>
           notification.id === notificationId ? { ...notification, unread: false } : notification,
@@ -2029,6 +2063,17 @@ document.addEventListener('DOMContentLoaded', () => {
         setNotificationPanel(false);
         if (link && link !== window.location.pathname) {
           window.location.assign(link);
+          return;
+        }
+        const permit = entityType === 'permit' ? state.permits.find((item) => item.id === entityId) : null;
+        if (permit) {
+          state.selectedPermitId = permit.id;
+          if (permit.isEmergency || type === 'emergency_permit_created') setView('emergency');
+          else if (type === 'permit_stage1_complete') setView('stage2');
+          else if (type === 'permit_rejected') setView('audit');
+          else setView('stage1');
+        } else {
+          setView('all');
         }
         return;
       }

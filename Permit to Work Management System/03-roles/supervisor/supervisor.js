@@ -95,8 +95,10 @@ document.addEventListener('DOMContentLoaded', () => {
     notificationButton: document.querySelector('#notificationButton'),
     notificationPanel: document.querySelector('#notificationPanel'),
     notificationCloseButton: document.querySelector('#notificationCloseButton'),
+    notificationReadAllButton: document.querySelector('#notificationReadAllButton'),
     notificationList: document.querySelector('#notificationList'),
     notificationCount: document.querySelector('#notificationCount'),
+    notificationDot: document.querySelector('#notificationDot'),
     logoutButton: document.querySelector('#logoutButton'),
   };
 
@@ -118,6 +120,8 @@ document.addEventListener('DOMContentLoaded', () => {
     extensionDecisions: readStoredObject(EXTENSION_STORAGE_KEY),
     siteValidationChecklists: readStoredObject(SITE_VALIDATION_STORAGE_KEY),
   };
+  const pendingWorkStateUpdates = new Map();
+  let workStateRequestSequence = 0;
 
   const digitalDocumentLabels = {
     MOS: {
@@ -299,14 +303,19 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderNotifications() {
     if (state.notifications.length) {
       const unreadCount = state.notifications.filter((item) => item.unread).length;
+      window.PTWNotifications?.updateBadge(elements.notificationDot, unreadCount);
+      elements.notificationReadAllButton.disabled = unreadCount === 0;
       elements.notificationCount.textContent =
         unreadCount ? `${unreadCount} unread` : state.notifications.length === 1 ? '1 item' : `${state.notifications.length} items`;
       elements.notificationList.innerHTML = state.notifications
         .map((item) => `
           <button class="notification-item" type="button"
             data-notification-id="${escapeHtml(item.id || '')}"
-            data-notification-link="${escapeHtml(item.link || '')}">
-            <span>${escapeHtml(item.type || 'Update')}</span>
+            data-notification-link="${escapeHtml(item.link || '')}"
+            data-notification-type="${escapeHtml(item.type || '')}"
+            data-notification-entity-type="${escapeHtml(item.entityType || '')}"
+            data-notification-entity-id="${escapeHtml(item.entityId || '')}">
+            <span>${escapeHtml(window.PTWNotifications?.typeLabel(item.type) || item.type || 'Update')}</span>
             <strong>${escapeHtml(item.title)}</strong>
             <p>${escapeHtml(item.message || 'PTW update')}</p>
           </button>
@@ -316,6 +325,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const items = supervisorNotificationItems();
+    window.PTWNotifications?.updateBadge(elements.notificationDot, 0);
+    elements.notificationReadAllButton.disabled = true;
     elements.notificationCount.textContent = `${items.length} items`;
     elements.notificationList.innerHTML = items
       .map((item) => `
@@ -332,6 +343,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!elements.notificationPanel) return;
     elements.notificationPanel.hidden = !open;
     elements.notificationButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  async function markAllNotificationsRead() {
+    elements.notificationReadAllButton.disabled = true;
+    try {
+      await apiRequest('/api/notifications/read-all', { method: 'PATCH' });
+      state.notifications = state.notifications.map((item) => ({ ...item, unread: false, readAt: new Date().toISOString() }));
+      renderNotifications();
+    } catch {
+      elements.notificationReadAllButton.disabled = false;
+    }
   }
 
   function readStoredSet(key) {
@@ -460,7 +482,10 @@ document.addEventListener('DOMContentLoaded', () => {
       loadNotifications(),
     ]);
 
-    state.permits = (permitResult.permits || permitResult.data || []).map(normalizePermit);
+    state.permits = (permitResult.permits || permitResult.data || []).map(normalizePermit).map((permit) => {
+      const pending = pendingWorkStateUpdates.get(permit.id);
+      return pending ? { ...permit, ...pending.optimisticPermit } : permit;
+    });
     state.siteValidationChecklists = {
       ...state.siteValidationChecklists,
       ...state.permits.reduce((records, permit) => {
@@ -577,12 +602,17 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!['rejected', 'cancelled', 'returned'].includes(status)) return 'sent_for_closure';
     }
 
-    const stateName = permit.workState || permit.work_state || state.workStates[permit.id]?.state || 'active';
+    const pendingState = pendingWorkStateUpdates.get(permit.id)?.stateName;
+    const stateName = pendingState || permit.workState || permit.work_state || state.workStates[permit.id]?.state || 'active';
     return stateName === 'final_closure' ? 'sent_for_closure' : stateName;
   }
 
   function isClosureTrackingPermit(permit) {
     return ['sent_for_closure', 'closed'].includes(getWorkCondition(permit));
+  }
+
+  function isWorkTimerStopped(permit) {
+    return ['held', 'stopped', 'sent_for_closure', 'closed'].includes(getWorkCondition(permit));
   }
 
   function isLiveWorkPermit(permit) {
@@ -603,7 +633,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function isDueWithin(permit, hours) {
-    if (!isPermitExpiryEnforced(permit)) return false;
+    if (!isPermitExpiryEnforced(permit) || isWorkTimerStopped(permit)) return false;
     const end = new Date(permit.endDateTime);
     if (Number.isNaN(end.getTime())) return false;
     const diff = end.getTime() - syncedNowMs();
@@ -612,13 +642,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function remainingMs(permit) {
     if (!isPermitExpiryEnforced(permit)) return 0;
+    if (isWorkTimerStopped(permit)) {
+      return Math.max(0, Number(permit.timerRemainingSeconds) || 0) * 1000;
+    }
     const end = new Date(permit.endDateTime);
     if (Number.isNaN(end.getTime())) return 0;
     return Math.max(0, end.getTime() - syncedNowMs());
   }
 
   function isPermitExpired(permit) {
-    if (!isPermitExpiryEnforced(permit)) return false;
+    if (!isPermitExpiryEnforced(permit) || isWorkTimerStopped(permit)) return false;
     const end = new Date(permit.endDateTime);
     return !Number.isNaN(end.getTime()) && end.getTime() <= syncedNowMs();
   }
@@ -626,6 +659,13 @@ document.addEventListener('DOMContentLoaded', () => {
   function formatRemaining(permit) {
     if (isClosureTrackingPermit(permit)) return 'Stopped';
     if (!isPermitExpiryEnforced(permit)) return 'Not released';
+    const workCondition = getWorkCondition(permit);
+    const hasFrozenTime = permit.timerRemainingSeconds !== null
+      && permit.timerRemainingSeconds !== undefined
+      && Number.isFinite(Number(permit.timerRemainingSeconds));
+    if (isWorkTimerStopped(permit) && !hasFrozenTime) {
+      return workCondition === 'held' ? 'Paused' : 'Stopped';
+    }
     const ms = remainingMs(permit);
     const totalSeconds = Math.floor(ms / 1000);
     const hours = Math.floor(totalSeconds / 3600);
@@ -644,9 +684,10 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!permit) return;
 
       const closureTracked = isClosureTrackingPermit(permit);
-      const expired = !closureTracked && isPermitExpired(permit);
+      const timerStopped = isWorkTimerStopped(permit);
+      const expired = !timerStopped && isPermitExpired(permit);
       const remaining = formatRemaining(permit);
-      const timeClass = closureTracked ? '' : expired ? 'danger' : isDueWithin(permit, 1) ? 'danger' : isDueWithin(permit, 2) ? 'warning' : '';
+      const timeClass = timerStopped ? '' : expired ? 'danger' : isDueWithin(permit, 1) ? 'danger' : isDueWithin(permit, 2) ? 'warning' : '';
 
       if (element.dataset.countdownValue === 'true') {
         element.textContent = remaining;
@@ -657,7 +698,13 @@ document.addEventListener('DOMContentLoaded', () => {
       if (element.dataset.countdownBox === 'true') {
         element.classList.toggle('expired', expired);
         const label = element.querySelector('[data-countdown-label]');
-        if (label) label.textContent = expired ? 'Window Expired' : 'Time Remaining';
+        if (label) label.textContent = getWorkCondition(permit) === 'held'
+          ? 'Timer Paused'
+          : timerStopped
+            ? 'Timer Stopped'
+            : expired
+              ? 'Window Expired'
+              : 'Time Remaining';
         const note = element.querySelector('[data-countdown-expired-note]');
         if (note) note.hidden = !expired;
       }
@@ -669,8 +716,8 @@ document.addEventListener('DOMContentLoaded', () => {
       bar.style.width = `${remainingProgress(permit)}%`;
       const wrapper = bar.closest('.validity-bar');
       if (wrapper) {
-        const closureTracked = isClosureTrackingPermit(permit);
-        const expired = !closureTracked && isPermitExpired(permit);
+        const timerStopped = isWorkTimerStopped(permit);
+        const expired = !timerStopped && isPermitExpired(permit);
         wrapper.classList.toggle('danger', expired || isDueWithin(permit, 1));
         wrapper.classList.toggle('warning', !expired && !isDueWithin(permit, 1) && isDueWithin(permit, 2));
       }
@@ -944,7 +991,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function sortMonitoringPermits(permits) {
     const order = {
       active: 0,
-      resumed: 1,
+      resumed: 0,
       held: 2,
       stopped: 3,
       sent_for_closure: 4,
@@ -980,6 +1027,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const stopped = workState === 'stopped';
     const sentForClosure = workState === 'sent_for_closure';
     const closed = workState === 'closed';
+    const savingWorkState = pendingWorkStateUpdates.has(permit.id);
+    const running = workState === 'active' || workState === 'resumed';
     const closureTracked = sentForClosure || closed;
     const expired = !closureTracked && isPermitExpired(permit);
     const timeClass = closureTracked ? '' : expired ? 'danger' : isDueWithin(permit, 1) ? 'danger' : isDueWithin(permit, 2) ? 'warning' : '';
@@ -993,9 +1042,9 @@ document.addEventListener('DOMContentLoaded', () => {
       : closureTracked
         ? `<button class="execution-button" type="button" data-review-id="${escapeHtml(permit.id)}">View Details</button>`
         : `
-        <button class="execution-button" type="button" data-hold-id="${escapeHtml(permit.id)}">${held ? 'Held' : 'Hold'}</button>
-        <button class="execution-button danger" type="button" data-stop-id="${escapeHtml(permit.id)}">${stopped ? 'Stopped' : 'Stop'}</button>
-        <button class="execution-button success" type="button" data-resume-id="${escapeHtml(permit.id)}">${workState === 'active' ? 'Work' : 'Resume'}</button>
+        <button class="execution-button" type="button" data-hold-id="${escapeHtml(permit.id)}" ${savingWorkState || held ? 'disabled' : ''}>${held ? 'Held' : 'Hold'}</button>
+        <button class="execution-button danger" type="button" data-stop-id="${escapeHtml(permit.id)}" ${savingWorkState || stopped ? 'disabled' : ''}>${stopped ? 'Stopped' : 'Stop'}</button>
+        <button class="execution-button success" type="button" data-resume-id="${escapeHtml(permit.id)}" ${savingWorkState || running ? 'disabled' : ''}>${savingWorkState ? 'Saving…' : running ? 'Running' : 'Resume'}</button>
       `;
 
     return `
@@ -1137,25 +1186,73 @@ document.addEventListener('DOMContentLoaded', () => {
     return getWorkCondition(permit);
   }
 
-  function setWorkState(permitId, stateName) {
+  function setWorkState(permitId, stateName, note = '') {
+    const currentPermit = state.permits.find((permit) => permit.id === permitId);
+    const timerWillStop = ['held', 'stopped', 'sent_for_closure', 'closed'].includes(stateName);
+    const timerWasStopped = currentPermit ? isWorkTimerStopped(currentPermit) : false;
+    let timerRemainingSeconds = currentPermit?.timerRemainingSeconds;
+    let timerPausedAt = currentPermit?.timerPausedAt || '';
+    let endDateTime = currentPermit?.endDateTime;
+
+    if (currentPermit && timerWillStop && !timerWasStopped) {
+      const endTime = new Date(currentPermit.endDateTime).getTime();
+      timerRemainingSeconds = Number.isNaN(endTime)
+        ? null
+        : Math.max(0, Math.floor((endTime - syncedNowMs()) / 1000));
+      timerPausedAt = syncedNowIso();
+    } else if (currentPermit && !timerWillStop && timerWasStopped) {
+      const hasFrozenTime = timerRemainingSeconds !== null
+        && timerRemainingSeconds !== undefined
+        && Number.isFinite(Number(timerRemainingSeconds));
+      if (hasFrozenTime) {
+        endDateTime = new Date(syncedNowMs() + Math.max(0, Number(timerRemainingSeconds)) * 1000).toISOString();
+      }
+      timerRemainingSeconds = null;
+      timerPausedAt = '';
+    }
+
+    const requestId = ++workStateRequestSequence;
+    const optimisticPermit = {
+      workState: stateName,
+      timerRemainingSeconds,
+      timerPausedAt,
+      endDateTime,
+    };
+    pendingWorkStateUpdates.set(permitId, { requestId, stateName, optimisticPermit });
     state.workStates[permitId] = {
       state: stateName,
       updatedAt: syncedNowIso(),
     };
     state.permits = state.permits.map((permit) =>
-      permit.id === permitId ? { ...permit, workState: stateName } : permit,
+      permit.id === permitId
+        ? { ...permit, ...optimisticPermit }
+        : permit,
     );
     persistStoredObject(WORK_STATE_STORAGE_KEY, state.workStates);
     apiRequest(`/api/permits/${encodeURIComponent(permitId)}/work-state`, {
       method: 'PATCH',
-      body: JSON.stringify({ workState: stateName }),
+      body: JSON.stringify({ workState: stateName, note }),
     })
       .then((result) => {
         if (!result?.permit) return;
         const updated = normalizePermit(result.permit);
         state.permits = state.permits.map((permit) => (permit.id === updated.id ? updated : permit));
+        state.workStates[permitId] = {
+          state: updated.workState || stateName,
+          updatedAt: updated.updatedAt || syncedNowIso(),
+        };
+        persistStoredObject(WORK_STATE_STORAGE_KEY, state.workStates);
       })
-      .catch(() => {});
+      .catch((error) => {
+        showToast(error.error || error.message || 'Unable to update the work state.');
+        refreshData().catch(() => {});
+      })
+      .finally(() => {
+        if (pendingWorkStateUpdates.get(permitId)?.requestId === requestId) {
+          pendingWorkStateUpdates.delete(permitId);
+        }
+        if (state.activeView === 'monitoring') renderMonitoring();
+      });
   }
 
   function formatWorkState(stateName) {
@@ -1169,7 +1266,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function holdPermit(permitId) {
     state.heldPermits.add(permitId);
-    setWorkState(permitId, 'held');
+    setWorkState(permitId, 'held', 'Supervisor placed active work on hold from monitoring');
     persistStoredSet(HELD_STORAGE_KEY, state.heldPermits);
     renderMonitoring();
     showToast('Work has been placed on hold for supervisor follow-up.');
@@ -1177,7 +1274,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function stopPermit(permitId) {
     state.heldPermits.delete(permitId);
-    setWorkState(permitId, 'stopped');
+    setWorkState(permitId, 'stopped', 'Supervisor stopped active work from monitoring');
     persistStoredSet(HELD_STORAGE_KEY, state.heldPermits);
     renderMonitoring();
     showToast('Work has been stopped and remains visible for monitoring.');
@@ -1185,7 +1282,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function resumePermit(permitId) {
     const wasHeld = state.heldPermits.delete(permitId);
-    setWorkState(permitId, 'resumed');
+    setWorkState(permitId, 'resumed', 'Supervisor resumed work after monitoring review');
     persistStoredSet(HELD_STORAGE_KEY, state.heldPermits);
     renderMonitoring();
     showToast(wasHeld ? 'Work state changed to resume.' : 'Work state is resume.');
@@ -2558,11 +2655,15 @@ document.addEventListener('DOMContentLoaded', () => {
       setNotificationPanel(elements.notificationPanel?.hidden);
     });
     elements.notificationCloseButton?.addEventListener('click', () => setNotificationPanel(false));
+    elements.notificationReadAllButton?.addEventListener('click', markAllNotificationsRead);
     elements.notificationList?.addEventListener('click', (event) => {
       const persistentButton = event.target.closest('[data-notification-id]');
       if (persistentButton) {
         const notificationId = persistentButton.dataset.notificationId;
         const link = persistentButton.dataset.notificationLink || '';
+        const type = persistentButton.dataset.notificationType || '';
+        const entityType = persistentButton.dataset.notificationEntityType || '';
+        const entityId = persistentButton.dataset.notificationEntityId || '';
         apiRequest(`/api/notifications/${encodeURIComponent(notificationId)}/read`, { method: 'PATCH' }).catch(() => {});
         state.notifications = state.notifications.map((notification) =>
           notification.id === notificationId ? { ...notification, unread: false } : notification,
@@ -2571,6 +2672,13 @@ document.addEventListener('DOMContentLoaded', () => {
         setNotificationPanel(false);
         if (link && link !== window.location.pathname) {
           window.location.assign(link);
+          return;
+        }
+        if (entityType === 'permit' && entityId && state.permits.some((permit) => permit.id === entityId)) {
+          if (type === 'permit_active') setView('monitoring');
+          else openPermitReview(entityId, 'dashboard');
+        } else {
+          setView('dashboard');
         }
         return;
       }

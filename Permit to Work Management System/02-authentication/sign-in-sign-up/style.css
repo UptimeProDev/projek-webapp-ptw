@@ -383,6 +383,15 @@ select:focus-visible {
   overflow: hidden;
 }
 
+.mode-toggle.single-mode {
+  grid-template-columns: 1fr;
+}
+
+.mode-toggle.single-mode::before {
+  width: calc(100% - 10px);
+  transform: none !important;
+}
+
 .mode-toggle::before {
   position: absolute;
   top: 5px;

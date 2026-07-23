@@ -1,177 +1,161 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Organization Admin | PTW Guardian</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/organization.css?v=11" />
+  <link rel="stylesheet" href="/organization.css?v=16">
+  <link rel="stylesheet" href="/responsive.css?v=1">
+  <link rel="stylesheet" href="/role-sidebar.css?v=12">
 </head>
 <body>
   <div class="org-shell">
-    <aside class="org-sidebar">
-      <button class="org-sidebar-trigger" type="button" aria-label="Open sidebar menu">
-        <span></span>
-        <span></span>
-        <span></span>
-      </button>
-      <div class="org-brand">
-        <img src="/assets/ptw-guardian-brandmark-v3.png" alt="PTW Guardian" />
-      </div>
-
-      <nav class="org-nav">
-        <button class="org-nav-item active" type="button">User Management</button>
+    <aside class="org-sidebar" id="orgSidebar">
+      <button class="org-sidebar-trigger" id="sidebarTrigger" type="button" aria-label="Open sidebar menu"><span></span><span></span><span></span></button>
+      <div class="org-brand"><img src="/assets/ptw-guardian-brandmark-sidebar.png" alt="PTW Guardian"></div>
+      <nav class="org-nav" aria-label="Organization administration">
+        <button class="org-nav-item active" type="button" data-view="overview"><span>⌂</span>Overview</button>
+        <button class="org-nav-item" type="button" data-view="profile"><span>▣</span>Company Profile</button>
+        <button class="org-nav-item" type="button" data-view="users"><span>♟</span>User Management</button>
+        <button class="org-nav-item" type="button" data-view="sites"><span>▦</span>Sites &amp; Locations</button>
+        <button class="org-nav-item" type="button" data-view="workers"><span>♙</span>Workers &amp; Contractors</button>
+        <button class="org-nav-item" type="button" data-view="settings"><span>⚙</span>Company Settings</button>
+        <button class="org-nav-item" type="button" data-view="audit"><span>≡</span>Audit Logs</button>
       </nav>
-
-      <div class="org-sidebar-footer">
-        <button class="org-side-button" id="supportButton" type="button">Support</button>
-        <button class="org-side-button" id="logoutButton" type="button">Logout</button>
-      </div>
+      <div class="org-sidebar-footer"><button class="org-side-button" id="supportButton" type="button">Support</button><button class="org-side-button" id="logoutButton" type="button">Logout</button></div>
     </aside>
 
     <main class="org-main">
       <header class="org-topbar">
-        <div class="page-title">
-          <h2>Organization Admin</h2>
-        </div>
-
-        <label class="search-box">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 19.6-5.4-5.4a7.6 7.6 0 1 0-1.4 1.4L19.6 21 21 19.6ZM4 10a6 6 0 1 1 12 0 6 6 0 0 1-12 0Z"/></svg>
-          <span class="sr-only">Search organization users</span>
-          <input type="search" placeholder="Search team members or roles..." />
-        </label>
-
-        <button class="icon-button" type="button" aria-label="Refresh organization workspace">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h8V3l-3.3 3.3Z"/></svg>
-        </button>
-
+        <div class="page-title"><h2 id="topbarTitle">Overview</h2><small id="topbarTenant">Organization workspace</small></div>
+        <label class="search-box"><span>⌕</span><span class="sr-only">Search current view</span><input id="searchInput" type="search" placeholder="Search organization workspace..."></label>
+        <button class="icon-button refresh-button" id="refreshButton" type="button" aria-label="Refresh current view"><span class="refresh-symbol" aria-hidden="true">&#8635;</span></button>
         <div class="topbar-divider" aria-hidden="true"></div>
-
-        <button class="icon-button notification-button" type="button" aria-label="Notifications">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a2.4 2.4 0 0 0 2.3-1.8H9.7A2.4 2.4 0 0 0 12 22ZM5 17h14l-1.7-2.3V10a5.3 5.3 0 0 0-4.2-5.2V3a1.1 1.1 0 0 0-2.2 0v1.8A5.3 5.3 0 0 0 6.7 10v4.7L5 17Z"/></svg>
-          <span class="notification-dot" aria-hidden="true"></span>
-        </button>
-
-        <button class="org-profile profile-button" type="button" id="profileButton" aria-label="Open account menu">
-          <span class="profile-copy">
-            <strong id="profileName">Organization Admin</strong>
-            <span id="profileRole">Workspace Owner</span>
-          </span>
-          <span class="org-avatar profile-avatar" id="profileAvatar">OA</span>
-        </button>
+        <div class="notification-wrap">
+          <button class="icon-button notification-button" id="notificationButton" type="button" aria-label="Open notifications" aria-expanded="false" aria-controls="notificationPanel"><span class="notification-bell" aria-hidden="true">&#128276;</span><span class="notification-dot" id="notificationDot" aria-label="Unread notifications" hidden></span></button>
+          <div class="notification-panel" id="notificationPanel" hidden><div class="notification-head"><div><strong>Notifications</strong><span id="notificationCount">0 items</span></div><div class="notification-actions"><button id="notificationReadAllButton" type="button">Mark all read</button><button id="notificationCloseButton" type="button">Close</button></div></div><div class="notification-list" id="notificationList"></div></div>
+        </div>
+        <button class="org-profile profile-button" type="button" id="profileButton"><span class="profile-copy"><strong id="profileName">Organization Admin</strong><span id="profileRole">Tenant administrator</span></span><span class="org-avatar profile-avatar" id="profileAvatar">OA</span></button>
       </header>
 
       <section class="org-workspace">
-        <div class="org-page-head">
-          <div>
-            <h1>Organization Admin</h1>
-            <p>Manage company users and assign PTW operational roles.</p>
-          </div>
-          <span class="org-badge" id="userCount">0 users</span>
-        </div>
+        <p class="org-status" id="sectionStatus" role="status" aria-live="polite" hidden></p>
 
-        <p class="org-status" id="sectionStatus" role="status" aria-live="polite">Loading organization workspace...</p>
-
-        <section class="org-summary" aria-label="Organization summary">
-          <div>
-            <span>Organization / Contractor Entity</span>
-            <strong id="organizationName">-</strong>
-          </div>
-          <div>
-            <span>Company Registration No. / Contractor ID</span>
-            <strong id="registrationNo">-</strong>
-          </div>
-          <div>
-            <span>Organization Admin</span>
-            <strong id="ownerName">-</strong>
-          </div>
+        <section class="org-view active" data-panel="overview">
+          <div class="org-page-head"><div><span class="org-kicker">Tenant operations</span><h1>Company overview</h1><p>Users, sites, workers, permits, and recent administration activity for your organization only.</p></div><span class="org-badge" id="organizationStatus">Active</span></div>
+          <section class="org-summary overview-identity"><button type="button" data-go-view="profile" aria-label="Open company profile"><span>Organization</span><strong id="organizationName">-</strong></button><button type="button" data-go-view="profile" aria-label="Open company details"><span>Registration number</span><strong id="registrationNo">-</strong></button><button type="button" data-go-view="users" aria-label="Open company user management"><span>Organization Admin</span><strong id="ownerName">-</strong></button></section>
+          <section class="org-metric-grid">
+            <button type="button" data-go-view="users" aria-label="Open company users"><span class="metric-symbol blue">U</span><div><small>Company users</small><strong id="metricUsers">0</strong><p><b id="metricActiveUsers">0</b> active accounts</p></div></button>
+            <button type="button" data-go-view="workers" aria-label="Open workers and contractors"><span class="metric-symbol green">W</span><div><small>Workers</small><strong id="metricWorkers">0</strong><p><b id="metricActiveWorkers">0</b> approved</p></div></button>
+            <button type="button" data-go-view="audit" data-audit-category="permit_workflow" aria-label="Open permit activity"><span class="metric-symbol violet">P</span><div><small>Permits</small><strong id="metricPermits">0</strong><p><b id="metricActivePermits">0</b> active now</p></div></button>
+            <button type="button" data-go-view="sites" aria-label="Open sites and locations"><span class="metric-symbol amber">S</span><div><small>Sites</small><strong id="metricSites">0</strong><p><b id="metricActiveSites">0</b> active locations</p></div></button>
+          </section>
+          <section class="org-panel"><div class="org-panel-head"><div><h2>Recent company activity</h2><p>Tenant administration and PTW activity recorded for your organization.</p></div><button class="org-link-button" type="button" data-go-view="audit">View audit logs</button></div><div class="activity-list" id="recentActivity"></div></section>
         </section>
 
-        <section class="org-panel">
-          <div class="org-panel-head">
-            <div>
-              <h2>Create Team Account</h2>
-              <p>Assign one or more operational roles to each user.</p>
+        <section class="org-view" data-panel="profile">
+          <div class="org-page-head"><div><span class="org-kicker">Company identity</span><h1>Company profile</h1><p>Maintain the contact information used across your tenant workspace.</p></div></div>
+          <section class="company-profile-hero">
+            <div class="company-profile-mark" id="companyProfileMark">CO</div>
+            <div class="company-profile-primary"><span>Organization profile</span><h2 id="companyProfileName">Company</h2><p id="companyProfileContact">Company contact information</p><div><span class="status-chip active" id="companyProfileStatus">Active</span><span class="profile-tier" id="companyProfileTier">Standard</span></div></div>
+            <div class="company-profile-facts"><div><span>Registration number</span><strong id="companyProfileRegistration">-</strong></div><div><span>Primary administrator</span><strong id="companyProfileAdmin">-</strong></div><div><span>Enabled modules</span><strong id="companyProfileModules">-</strong></div></div>
+          </section>
+          <form class="org-panel org-form-card" id="companyProfileForm">
+            <div class="org-panel-head"><div><h2>Organization information</h2><p>Update your company identity, contact details, and service information.</p></div></div>
+            <div class="org-form-grid profile-grid">
+              <label class="org-field"><span>Company name *</span><input name="name" required></label>
+              <label class="org-field"><span>Registration number *</span><input name="registrationNo" required></label>
+              <label class="org-field"><span>Business email *</span><input name="contactEmail" type="email" required></label>
+              <label class="org-field"><span>Contact number *</span><input name="contactNumber" required></label>
+              <label class="org-field"><span>Primary contact person *</span><input name="primaryContactName" required></label>
+              <label class="org-field"><span>Service tier *</span><select name="serviceTier" required><option value="standard">Standard</option><option value="professional">Professional</option><option value="enterprise">Enterprise</option></select></label>
+              <label class="org-field full-field"><span>Registered address *</span><textarea name="registeredAddress" rows="4" required></textarea></label>
             </div>
-          </div>
-
-          <form class="org-user-form" id="createUserForm" autocomplete="off">
-            <div class="org-form-grid">
-              <label class="org-field">
-                <span>Full Name</span>
-                <input id="newUserFullName" name="fullName" type="text" placeholder="Team member full name" required>
-              </label>
-              <label class="org-field">
-                <span>Work Email</span>
-                <input id="newUserEmail" name="email" type="email" placeholder="name@company.com" required>
-              </label>
-            </div>
-
-            <div class="org-role-picker">
-              <span>Assign Roles</span>
-              <div class="org-role-options" id="newUserRoles"></div>
-            </div>
-
-            <div class="org-button-row">
-              <button class="org-button secondary" type="reset">Clear</button>
-              <button class="org-button" type="submit">Create User</button>
-            </div>
+            <div class="org-button-row"><button class="org-button" type="submit">Save company profile</button></div>
           </form>
         </section>
 
-        <section class="org-panel">
-          <div class="org-panel-head">
-            <div>
-              <h2>Team Members</h2>
-              <p>Edit user details and operational access for this organization workspace.</p>
-            </div>
-          </div>
-          <div class="org-user-list" id="userList"></div>
+        <section class="org-view" data-panel="users">
+          <div class="org-page-head"><div><span class="org-kicker">Access control</span><h1>User management</h1><p>Create company accounts and assign one or more operational PTW roles.</p></div><span class="org-badge" id="userCount">0 users</span></div>
+          <section class="org-panel create-team-panel"><div class="org-panel-head"><div><h2>Create team account</h2><p>The user can sign in immediately using the password entered here.</p></div></div>
+            <form class="org-user-form" id="createUserForm" autocomplete="off"><div class="org-form-grid">
+              <label class="org-field"><span>Full name *</span><input id="newUserFullName" name="fullName" required></label>
+              <label class="org-field"><span>Work email *</span><input id="newUserEmail" name="email" type="email" required></label>
+              <label class="org-field"><span>Password *</span><input id="newUserPassword" name="password" type="password" minlength="8" autocomplete="new-password" required></label>
+              <label class="org-field"><span>Confirm password *</span><input id="newUserConfirmPassword" name="confirmPassword" type="password" minlength="8" autocomplete="new-password" required></label>
+            </div><div class="org-role-picker"><span>Assign roles *</span><div class="org-role-options" id="newUserRoles"></div></div><div class="org-button-row"><button class="org-button secondary" type="reset">Clear</button><button class="org-button" type="submit">Create user</button></div></form>
+          </section>
+          <section class="org-panel"><div class="org-panel-head"><div><h2>Team members</h2><p>Edit roles and activate or deactivate access.</p></div></div><div class="org-user-list" id="userList"></div></section>
+        </section>
+
+        <section class="org-view" data-panel="sites">
+          <div class="org-page-head"><div><span class="org-kicker">Work locations</span><h1>Sites &amp; locations</h1><p>Configure company facilities and the work areas used for PTW operations.</p></div><span class="org-badge" id="siteCount">0 sites</span></div>
+          <section class="org-panel"><div class="org-panel-head"><div><h2 id="siteFormTitle">Add site</h2><p>List work areas on separate lines or separate them with commas.</p></div></div>
+            <form class="org-user-form" id="siteForm"><input name="siteId" type="hidden"><div class="org-form-grid"><label class="org-field"><span>Site name *</span><input name="name" required placeholder="Main Plant"></label><label class="org-field"><span>Site code *</span><input name="code" required placeholder="PLANT-01"></label><label class="org-field full-field"><span>Address *</span><textarea name="address" rows="2" required></textarea></label><label class="org-field full-field"><span>Work areas</span><textarea name="workAreas" rows="3" placeholder="Boiler House, Tank Farm, Workshop"></textarea></label></div><div class="org-button-row"><button class="org-button secondary" id="cancelSiteEdit" type="button" hidden>Cancel edit</button><button class="org-button" id="saveSiteButton" type="submit">Add site</button></div></form>
+          </section>
+          <section class="org-card-grid" id="siteList"></section>
+        </section>
+
+        <section class="org-view" data-panel="workers">
+          <div class="org-page-head"><div><span class="org-kicker">Competency control</span><h1>Workers &amp; contractors</h1><p>Add workers, assign their approved work types, and control access for your company.</p></div><div class="worker-page-actions"><span class="org-badge" id="workerCount">0 workers</span><button class="org-button" id="addWorkerButton" type="button">+ Add worker</button></div></div>
+          <div class="scope-note">Workers added here are immediately available in the Admin permit view and to Requesters assigning workers to a matching permit type.</div>
+          <section class="org-panel"><div class="org-table-wrap"><table class="org-table"><thead><tr><th>Worker</th><th>Employee ID</th><th>Role / trade</th><th>Approved work types</th><th>Company</th><th>Expiry</th><th>Status</th><th></th></tr></thead><tbody id="workerRows"></tbody></table></div></section>
+        </section>
+
+        <section class="org-view" data-panel="settings">
+          <div class="org-page-head"><div><span class="org-kicker">Tenant configuration</span><h1>Company settings</h1><p>Configure local PTW behavior without changing platform-wide policies.</p></div></div>
+          <form id="companySettingsForm"><div class="settings-layout">
+            <section class="org-panel settings-card"><div class="org-panel-head"><div><h2>Permit configuration</h2><p>Defaults used within this organization.</p></div></div><label class="org-field"><span>Permit reference prefix</span><input name="permitPrefix" maxlength="12" required></label><label class="org-field"><span>Organization timezone</span><select name="timezone"><option value="Asia/Kuala_Lumpur">Asia/Kuala Lumpur</option><option value="UTC">UTC</option><option value="Asia/Singapore">Asia/Singapore</option></select></label></section>
+            <section class="org-panel settings-card"><div class="org-panel-head"><div><h2>Operational controls</h2><p>Company-level workflow preferences.</p></div></div><label class="setting-toggle"><span><strong>Require site selection</strong><small>Permits should reference a configured site.</small></span><input name="requireSiteSelection" type="checkbox"></label><label class="setting-toggle"><span><strong>Email notifications</strong><small>Allow PTW workflow email notifications.</small></span><input name="emailNotifications" type="checkbox"></label><label class="setting-toggle"><span><strong>Emergency permits</strong><small>Allow emergency permit workflows for this tenant.</small></span><input name="allowEmergencyPermits" type="checkbox"></label></section>
+            <section class="org-panel enabled-modules"><div class="org-panel-head"><div><h2>Enabled modules</h2><p>Module availability is controlled by Platform Superadmin.</p></div></div><div id="enabledModules"></div></section>
+          </div><div class="org-button-row settings-save"><button class="org-button" type="submit">Save company settings</button></div></form>
+        </section>
+
+        <section class="org-view" data-panel="audit">
+          <div class="org-page-head"><div><span class="org-kicker">Tenant accountability</span><h1>Company audit logs</h1><p>Append-only administration and permit activity belonging only to your company.</p></div><button class="org-button secondary" id="exportAuditButton" type="button">Export CSV</button></div>
+          <section class="org-panel"><div class="org-table-tools"><select id="auditCategory"><option value="">All categories</option><option value="tenant_administration">Administration</option><option value="configuration">Configuration</option><option value="security">Security</option><option value="permit_workflow">Permit workflow</option></select><span id="auditCount">0 records</span></div><div class="org-table-wrap"><table class="org-table"><thead><tr><th>Event</th><th>Actor</th><th>Category</th><th>Outcome</th><th>Timestamp</th></tr></thead><tbody id="auditRows"></tbody></table></div></section>
         </section>
       </section>
     </main>
   </div>
 
-  <div class="org-modal-backdrop" id="editUserModal" hidden>
-    <section class="org-modal" role="dialog" aria-modal="true" aria-labelledby="editUserTitle">
-      <div class="org-modal-head">
-        <div>
-          <h2 id="editUserTitle">Edit User</h2>
-          <p id="editUserMeta">Team member access</p>
-        </div>
-        <button class="org-icon-button" id="closeEditModal" type="button" aria-label="Close edit form">x</button>
-      </div>
+  <div class="org-modal-backdrop" id="editUserModal" hidden><section class="org-modal" role="dialog" aria-modal="true" aria-labelledby="editUserTitle"><div class="org-modal-head"><div><h2 id="editUserTitle">Edit user</h2><p id="editUserMeta">Team member access</p></div><button class="org-icon-button" id="closeEditModal" type="button" aria-label="Close">×</button></div><form class="org-modal-form" id="editUserForm"><input id="editUserId" type="hidden"><div class="org-form-grid"><label class="org-field"><span>Name</span><input id="editUserFullName" required></label><label class="org-field"><span>Email</span><input id="editUserEmail" type="email" required></label></div><div class="org-role-picker"><span>Roles</span><div class="org-role-options" id="editUserRoles"></div></div><div class="org-danger-actions"><button class="org-button warning" id="removeAccessButton" type="button">Deactivate</button><button class="org-button danger" id="deleteUserButton" type="button">Delete user</button></div><div class="org-button-row"><button class="org-button secondary" id="cancelEditModal" type="button">Cancel</button><button class="org-button" type="submit">Save changes</button></div></form></section></div>
 
-      <form class="org-modal-form" id="editUserForm" autocomplete="off">
-        <input id="editUserId" type="hidden">
+  <div class="org-modal-backdrop" id="addWorkerModal" hidden>
+    <section class="org-modal worker-modal" role="dialog" aria-modal="true" aria-labelledby="addWorkerTitle">
+      <div class="org-modal-head">
+        <div><h2 id="addWorkerTitle">Add worker</h2><p>Assign the worker to approved types of work.</p></div>
+        <button class="org-icon-button" id="closeWorkerModal" type="button" aria-label="Close">&times;</button>
+      </div>
+      <form class="org-modal-form" id="addWorkerForm">
+        <label class="org-field full-field">
+          <span>Registered worker account</span>
+          <select id="workerAccount" name="workerAccount" required></select>
+          <small id="workerAccountHelp">Select a company user who has Worker access.</small>
+        </label>
+        <div class="worker-account-preview" id="workerAccountPreview" hidden></div>
         <div class="org-form-grid">
-          <label class="org-field">
-            <span>Name</span>
-            <input id="editUserFullName" name="fullName" type="text" required>
-          </label>
-          <label class="org-field">
-            <span>Email</span>
-            <input id="editUserEmail" name="email" type="email" required>
-          </label>
+          <label class="org-field"><span>IC / Passport number</span><input name="icPassport" required maxlength="80" autocomplete="off"></label>
+          <label class="org-field"><span>Phone number</span><input name="phone" type="tel" maxlength="50" autocomplete="tel"></label>
+          <label class="org-field"><span>Role / trade</span><input name="role" required maxlength="120" placeholder="e.g. Welder, Electrician"></label>
+          <label class="org-field"><span>Competency expiry</span><input name="expiry" type="date"></label>
         </div>
         <div class="org-role-picker">
-          <span>Roles</span>
-          <div class="org-role-options org-modal-role-options" id="editUserRoles"></div>
-        </div>
-        <div class="org-danger-actions">
-          <button class="org-button warning" id="removeAccessButton" type="button">Remove Access</button>
-          <button class="org-button danger" id="deleteUserButton" type="button">Delete User</button>
+          <span>Approved type of work</span>
+          <small>Select at least one. Requesters can assign this worker only to matching permit types.</small>
+          <div class="org-role-options worker-permit-options" id="workerPermitTypes"></div>
         </div>
         <div class="org-button-row">
-          <button class="org-button secondary" id="cancelEditModal" type="button">Cancel</button>
-          <button class="org-button" type="submit">Save Changes</button>
+          <button class="org-button secondary" id="cancelWorkerModal" type="button">Cancel</button>
+          <button class="org-button" id="saveWorkerButton" type="submit">Add worker</button>
         </div>
       </form>
     </section>
   </div>
 
-  <script src="/ptw-runtime.js?v=1"></script>
-  <script src="/organization.js?v=6"></script>
+  <script src="/ptw-runtime.js?v=9"></script>
+  <script src="/organization.js?v=13"></script>
   <script src="/role-switcher.js?v=4"></script>
 </body>
 </html>

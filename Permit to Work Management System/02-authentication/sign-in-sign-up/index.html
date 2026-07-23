@@ -5,10 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PTW SafetyGuard</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/style.css?v=17" />
+  <link rel="stylesheet" href="/style.css?v=18" />
+  <link rel="stylesheet" href="/responsive.css?v=1" />
 </head>
 <body>
-    <main class="auth-shell" data-mode="signup">
+    <main class="auth-shell" data-mode="login">
       <section class="visual-panel" aria-label="Industrial safety portal">
         <div class="visual-shade"></div>
         <div class="visual-inner">
@@ -39,12 +40,11 @@
       <section class="form-panel">
         <div class="form-wrap">
           <div class="auth-card">
-          <div class="mode-toggle" aria-label="Authentication mode">
-            <button type="button" data-switch="signup">Sign Up</button>
+          <div class="mode-toggle single-mode" aria-label="Authentication mode">
             <button type="button" data-switch="login">Sign In</button>
           </div>
 
-          <form class="auth-form" id="signupForm" autocomplete="on" data-signup-step="1">
+          <form class="auth-form is-hidden" id="signupForm" autocomplete="on" data-signup-step="1" hidden aria-hidden="true">
             <div class="form-heading">
               <h2>Sign Up</h2>
               <p>
@@ -297,8 +297,7 @@
             </p>
 
             <p class="switch-copy">
-              Don't have an account?
-              <button type="button" data-switch="signup">Sign Up</button>
+              New company? Contact the PTW Guardian platform administrator to request access.
             </p>
           </form>
 

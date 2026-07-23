@@ -451,6 +451,7 @@
     digitalDocumentStatus: document.querySelector("#digitalDocumentStatus"),
     notificationButton: document.querySelector("#notificationButton"),
     notificationCloseButton: document.querySelector("#notificationCloseButton"),
+    notificationReadAllButton: document.querySelector("#notificationReadAllButton"),
     notificationPanel: document.querySelector("#notificationPanel"),
     notificationList: document.querySelector("#notificationList"),
     notificationCount: document.querySelector("#notificationCount"),
@@ -1091,14 +1092,27 @@
 
   function buildNotifications() {
     if (state.notifications.length) {
-      return state.notifications.map((notification) => ({
-        id: notification.id,
-        title: notification.title,
-        detail: notification.message || "PTW update",
-        meta: formatDateTime(notification.createdAt),
-        link: notification.link,
-        unread: notification.unread,
-      }));
+      return state.notifications.map((notification) => {
+        const type = String(notification.type || "").toLowerCase();
+        const isWorker = notification.entityType === "worker" || type.startsWith("worker_");
+        const view = isWorker
+          ? "workers"
+          : ["permit_active", "permit_approved", "permit_closed"].includes(type) ? "compliance" : "permits";
+        const filter = type === "permit_rejected"
+          ? "rejected"
+          : type === "permit_active" ? "active" : type === "permit_draft_created" ? "draft" : "all";
+        return {
+          id: notification.id,
+          title: notification.title,
+          detail: notification.message || "PTW update",
+          meta: window.PTWNotifications?.typeLabel(type) || formatDateTime(notification.createdAt),
+          link: notification.link,
+          unread: notification.unread,
+          view,
+          filter,
+          query: notification.entityId || "",
+        };
+      });
     }
 
     const notifications = [];
@@ -1201,18 +1215,16 @@
   function renderNotifications() {
     if (!elements.notificationList) return;
     const notifications = buildNotifications();
-    const hasPersistentUnreadState = notifications.some((notification) =>
-      Object.prototype.hasOwnProperty.call(notification, "unread"),
-    );
-    const unreadCount = hasPersistentUnreadState
+    const unreadCount = state.notifications.length
       ? notifications.filter((notification) => notification.unread).length
-      : notifications.length;
+      : 0;
     const countLabel = unreadCount
       ? `${unreadCount} unread`
       : notifications.length === 1 ? "1 item" : `${notifications.length} items`;
 
     elements.notificationCount.textContent = countLabel;
-    elements.notificationDot.hidden = unreadCount === 0;
+    window.PTWNotifications?.updateBadge(elements.notificationDot, unreadCount);
+    elements.notificationReadAllButton.disabled = unreadCount === 0;
     elements.notificationButton?.setAttribute(
       "aria-label",
       notifications.length ? `Open notifications, ${countLabel}` : "Open notifications",
@@ -1245,6 +1257,22 @@
     if (!elements.notificationPanel || !elements.notificationButton) return;
     elements.notificationPanel.hidden = !open;
     elements.notificationButton.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  async function markAllNotificationsRead() {
+    if (state.mode !== "online") return;
+    elements.notificationReadAllButton.disabled = true;
+    try {
+      await apiRequest("/api/notifications/read-all", { method: "PATCH" });
+      state.notifications = state.notifications.map((item) => ({
+        ...item,
+        unread: false,
+        readAt: new Date().toISOString(),
+      }));
+      renderNotifications();
+    } catch {
+      elements.notificationReadAllButton.disabled = false;
+    }
   }
 
   function openNotificationTarget(button) {
@@ -3360,6 +3388,7 @@
       setNotificationPanel(elements.notificationPanel?.hidden);
     });
     elements.notificationCloseButton?.addEventListener("click", () => setNotificationPanel(false));
+    elements.notificationReadAllButton?.addEventListener("click", markAllNotificationsRead);
     elements.notificationList?.addEventListener("click", (event) => {
       const button = event.target.closest("[data-notification-view]");
       if (button) {

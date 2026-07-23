@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Safety Officer Lane 3 | PTW Guardian</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/safety.css?v=lane30" />
+  <link rel="stylesheet" href="/safety.css?v=lane31" />
+  <link rel="stylesheet" href="/responsive.css?v=1" />
+  <link rel="stylesheet" href="/role-sidebar.css?v=12" />
   </head>
 <body>
   <div class="safety-shell">
@@ -16,19 +18,19 @@
         <span></span>
       </button>
       <div class="brand">
-        <img class="brand-logo" src="/assets/ptw-guardian-brandmark-v3.png" alt="PTW Guardian" />
+        <img class="brand-logo" src="/assets/ptw-guardian-brandmark-sidebar.png" alt="PTW Guardian" />
       </div>
 
       <nav class="safety-nav" aria-label="Safety officer work queues">
-        <button class="nav-item active" type="button" data-view="all">All Reviews</button>
-        <button class="nav-item" type="button" data-view="stage1">MOS Approval</button>
-        <button class="nav-item" type="button" data-view="stage2">Permit Approval</button>
-        <button class="nav-item" type="button" data-view="audit">Review Log</button>
+        <button class="nav-item active" type="button" data-view="all"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5zM8 8h8M8 12h8M8 16h5"/></svg><span>All Reviews</span></button>
+        <button class="nav-item" type="button" data-view="stage1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 14l2 2 4-5"/></svg><span>MOS Approval</span></button>
+        <button class="nav-item" type="button" data-view="stage2"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4v5c0 5-3.4 8-8 9-4.6-1-8-4-8-9V7zM8 12l3 3 5-6"/></svg><span>Permit Approval</span></button>
+        <button class="nav-item" type="button" data-view="audit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v5l3 2M4.9 4.9A10 10 0 1 1 2 12h3M2 5v7h7"/></svg><span>Review Log</span></button>
       </nav>
       <div class="rail-footer">
-        <button class="rail-link" type="button" onclick="window.location.href='/account'">Account</button>
-        <button class="rail-link" type="button" onclick="window.location.href='/support'">Support</button>
-        <button class="rail-link" id="logoutButton" type="button">Logout</button>
+        <button class="rail-link" type="button" onclick="window.location.href='/account'"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span>Account</span></button>
+        <button class="rail-link" type="button" onclick="window.location.href='/support'"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.5 9a2.6 2.6 0 1 1 4.3 2c-1 .8-1.8 1.3-1.8 2.8M12 17h.01"/></svg><span>Support</span></button>
+        <button class="rail-link" id="logoutButton" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 17l5-5-5-5M15 12H3M21 3v18h-8"/></svg><span>Logout</span></button>
       </div>
     </aside>
 
@@ -43,22 +45,19 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 19.6-5.4-5.4a7.6 7.6 0 1 0-1.4 1.4L19.6 21 21 19.6ZM4 10a6 6 0 1 1 12 0 6 6 0 0 1-12 0Z"/></svg>
           <span class="sr-only">Search safety permits</span>
           <input id="searchInput" type="search" placeholder="Search permit, location, requester, hazard">
+          <button class="search-clear-button" id="searchClearButton" type="button" aria-label="Clear safety search" hidden>&times;</button>
         </label>
 
-        <button class="icon-button" id="refreshButton" type="button" aria-label="Refresh safety data">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h8V3l-3.3 3.3Z" />
-          </svg>
+        <button class="icon-button refresh-button" id="refreshButton" type="button" aria-label="Refresh safety data">
+          <span class="refresh-symbol" aria-hidden="true">&#8635;</span>
         </button>
 
         <div class="topbar-divider" aria-hidden="true"></div>
 
           <div class="notification-wrap">
-            <button class="icon-button" type="button" id="notificationButton" aria-label="Open notifications" aria-expanded="false" aria-controls="notificationPanel">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 22a2.4 2.4 0 0 0 2.3-1.8H9.7A2.4 2.4 0 0 0 12 22ZM5 17h14l-1.7-2.3V10a5.3 5.3 0 0 0-4.2-5.2V3a1.1 1.1 0 0 0-2.2 0v1.8A5.3 5.3 0 0 0 6.7 10v4.7L5 17Z" />
-              </svg>
-              <span class="notification-dot" aria-hidden="true"></span>
+            <button class="icon-button notification-button" type="button" id="notificationButton" aria-label="Open notifications" aria-expanded="false" aria-controls="notificationPanel">
+              <span class="notification-bell" aria-hidden="true">&#128276;</span>
+              <span class="notification-dot" id="notificationDot" aria-label="Unread notifications" hidden></span>
             </button>
             <div class="notification-panel" id="notificationPanel" hidden>
               <div class="notification-head">
@@ -66,7 +65,7 @@
                   <strong>Notifications</strong>
                   <span id="notificationCount">0 items</span>
                 </div>
-                <button class="link-button" type="button" id="notificationCloseButton">Close</button>
+                <div class="notification-actions"><button class="notification-read-all" type="button" id="notificationReadAllButton">Mark all as read</button><button class="link-button" type="button" id="notificationCloseButton">Close</button></div>
               </div>
               <div class="notification-list" id="notificationList"></div>
             </div>
@@ -162,8 +161,8 @@
     <div class="site-checklist-dialog-content" id="siteChecklistDialogContent"></div>
   </dialog>
 
-  <script src="/ptw-runtime.js?v=1"></script>
+  <script src="/ptw-runtime.js?v=9"></script>
   <script src="/role-switcher.js?v=4"></script>
-  <script src="/safety.js?v=lane25"></script>
+  <script src="/safety.js?v=lane28"></script>
 </body>
 </html>

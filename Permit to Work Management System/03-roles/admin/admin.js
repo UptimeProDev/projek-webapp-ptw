@@ -53,8 +53,10 @@ document.addEventListener('DOMContentLoaded', () => {
     notificationButton: document.querySelector('#notificationButton'),
     notificationPanel: document.querySelector('#notificationPanel'),
     notificationCloseButton: document.querySelector('#notificationCloseButton'),
+    notificationReadAllButton: document.querySelector('#notificationReadAllButton'),
     notificationList: document.querySelector('#notificationList'),
     notificationCount: document.querySelector('#notificationCount'),
+    notificationDot: document.querySelector('#notificationDot'),
     accountButton: document.querySelector('#accountButton'),
     filtersToggle: document.querySelector('#filtersToggle'),
     filterPanel: document.querySelector('#filterPanel'),
@@ -983,14 +985,19 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderNotifications() {
     if (state.notifications.length) {
       const unreadCount = state.notifications.filter((item) => item.unread).length;
+      window.PTWNotifications?.updateBadge(elements.notificationDot, unreadCount);
+      elements.notificationReadAllButton.disabled = unreadCount === 0;
       elements.notificationCount.textContent =
         unreadCount ? `${unreadCount} unread` : state.notifications.length === 1 ? '1 item' : `${state.notifications.length} items`;
       elements.notificationList.innerHTML = state.notifications
         .map((item) => `
           <button class="notification-item" type="button"
             data-notification-id="${escapeHtml(item.id || '')}"
-            data-notification-link="${escapeHtml(item.link || '')}">
-            <span>${escapeHtml(item.type || 'Update')}</span>
+            data-notification-link="${escapeHtml(item.link || '')}"
+            data-notification-type="${escapeHtml(item.type || '')}"
+            data-notification-entity-type="${escapeHtml(item.entityType || '')}"
+            data-notification-entity-id="${escapeHtml(item.entityId || '')}">
+            <span>${escapeHtml(window.PTWNotifications?.typeLabel(item.type) || item.type || 'Update')}</span>
             <strong>${escapeHtml(item.title)}</strong>
             <p>${escapeHtml(item.message || 'PTW update')}</p>
           </button>
@@ -1000,6 +1007,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const invalid = state.workers.filter((worker) => String(worker.status || '').toLowerCase() !== 'valid').length;
+    window.PTWNotifications?.updateBadge(elements.notificationDot, 0);
+    elements.notificationReadAllButton.disabled = true;
     const drafts = getDraftQueue().length;
     const items = [
       {
@@ -1030,6 +1039,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!elements.notificationPanel) return;
     elements.notificationPanel.hidden = !open;
     elements.notificationButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  async function markAllNotificationsRead() {
+    elements.notificationReadAllButton.disabled = true;
+    try {
+      await apiRequest('/api/notifications/read-all', { method: 'PATCH' });
+      state.notifications = state.notifications.map((item) => ({ ...item, unread: false, readAt: new Date().toISOString() }));
+      renderNotifications();
+    } catch {
+      elements.notificationReadAllButton.disabled = false;
+    }
   }
 
   async function loadData() {
@@ -1885,6 +1905,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderAudit(query = '') {
     const lowerQuery = query.trim().toLowerCase();
+    const trackedWorkStates = new Set(['held', 'stopped', 'resumed', 'final_closure', 'sent_for_closure']);
+    const permitAuditRows = Object.entries(state.permitLogs || {}).flatMap(([permitId, logs]) => {
+      const permit = state.permits.find((item) => item.id === permitId);
+      return (Array.isArray(logs) ? logs : [])
+        .filter((log) => {
+          const action = String(log.action || '').toLowerCase();
+          const nextState = String(log.status || '').toLowerCase();
+          return (action === 'work state changed' && trackedWorkStates.has(nextState))
+            || (action === 'status changed' && nextState === 'closed');
+        })
+        .map((log) => {
+          const stateLabel = permitHistoryTitle(log.status, log.action);
+          const permitLabel = permit ? formatPermitRouteId(permit) : permitId;
+          return {
+            time: formatDateTime(log.when),
+            sortTime: Date.parse(log.when || '') || 0,
+            actor: formatHistoryActor(log),
+            action: `${permitLabel} — ${stateLabel}${log.comment ? ` — ${log.comment}` : ''}`,
+            status: formatStatus(log.status || 'Recorded'),
+          };
+        });
+    });
     const completionRows = Object.values(state.completionRequests)
       .filter(Boolean)
       .map((request) => ({
@@ -1895,7 +1937,7 @@ document.addEventListener('DOMContentLoaded', () => {
         status: request.status === 'closed' ? 'Closed' : 'Pending Closure',
         request,
       }));
-    const rows = [...completionRows, ...state.audits].filter((audit) =>
+    const rows = [...permitAuditRows, ...completionRows, ...state.audits].filter((audit) =>
       [audit.time, audit.actor, audit.action, audit.status].join(' ').toLowerCase().includes(lowerQuery),
     ).sort((a, b) => (b.sortTime || 0) - (a.sortTime || 0));
 
@@ -2191,11 +2233,14 @@ document.addEventListener('DOMContentLoaded', () => {
       setNotificationPanel(elements.notificationPanel?.hidden);
     });
     elements.notificationCloseButton?.addEventListener('click', () => setNotificationPanel(false));
+    elements.notificationReadAllButton?.addEventListener('click', markAllNotificationsRead);
     elements.notificationList?.addEventListener('click', (event) => {
       const persistentButton = event.target.closest('[data-notification-id]');
       if (persistentButton) {
         const notificationId = persistentButton.dataset.notificationId;
         const link = persistentButton.dataset.notificationLink || '';
+        const entityType = persistentButton.dataset.notificationEntityType || '';
+        const entityId = persistentButton.dataset.notificationEntityId || '';
         apiRequest(`/api/notifications/${encodeURIComponent(notificationId)}/read`, { method: 'PATCH' }).catch(() => {});
         state.notifications = state.notifications.map((notification) =>
           notification.id === notificationId ? { ...notification, unread: false } : notification,
@@ -2204,7 +2249,10 @@ document.addEventListener('DOMContentLoaded', () => {
         setNotificationPanel(false);
         if (link && link !== window.location.pathname) {
           window.location.assign(link);
+          return;
         }
+        if (elements.searchInput) elements.searchInput.value = entityId;
+        setActiveSection(entityType === 'worker' ? 'competency' : 'draftReview');
         return;
       }
 

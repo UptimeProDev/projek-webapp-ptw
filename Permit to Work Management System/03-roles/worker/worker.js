@@ -39,8 +39,10 @@ document.addEventListener('DOMContentLoaded', () => {
     notificationButton: document.querySelector('#notificationButton'),
     notificationPanel: document.querySelector('#notificationPanel'),
     notificationCloseButton: document.querySelector('#notificationCloseButton'),
+    notificationReadAllButton: document.querySelector('#notificationReadAllButton'),
     notificationList: document.querySelector('#notificationList'),
     notificationCount: document.querySelector('#notificationCount'),
+    notificationDot: document.querySelector('#notificationDot'),
     searchInput: document.querySelector('#searchInput'),
     refreshButton: document.querySelector('#refreshButton'),
     logoutButton: document.querySelector('#logoutButton'),
@@ -236,14 +238,19 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderNotifications() {
     if (state.notifications.length) {
       const unreadCount = state.notifications.filter((item) => item.unread).length;
+      window.PTWNotifications?.updateBadge(elements.notificationDot, unreadCount);
+      elements.notificationReadAllButton.disabled = unreadCount === 0;
       elements.notificationCount.textContent =
         unreadCount ? `${unreadCount} unread` : state.notifications.length === 1 ? '1 item' : `${state.notifications.length} items`;
       elements.notificationList.innerHTML = state.notifications
         .map((item) => `
           <button class="notification-item" type="button"
             data-notification-id="${escapeHtml(item.id || '')}"
-            data-notification-link="${escapeHtml(item.link || '')}">
-            <span>${escapeHtml(item.type || 'Update')}</span>
+            data-notification-link="${escapeHtml(item.link || '')}"
+            data-notification-type="${escapeHtml(item.type || '')}"
+            data-notification-entity-type="${escapeHtml(item.entityType || '')}"
+            data-notification-entity-id="${escapeHtml(item.entityId || '')}">
+            <span>${escapeHtml(window.PTWNotifications?.typeLabel(item.type) || item.type || 'Update')}</span>
             <strong>${escapeHtml(item.title)}</strong>
             <p>${escapeHtml(item.message || 'PTW update')}</p>
           </button>
@@ -253,6 +260,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const items = workerNotificationItems();
+    window.PTWNotifications?.updateBadge(elements.notificationDot, 0);
+    elements.notificationReadAllButton.disabled = true;
     elements.notificationCount.textContent = `${items.length} items`;
     elements.notificationList.innerHTML = items
       .map((item) => `
@@ -269,6 +278,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!elements.notificationPanel) return;
     elements.notificationPanel.hidden = !open;
     elements.notificationButton?.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  async function markAllNotificationsRead() {
+    elements.notificationReadAllButton.disabled = true;
+    try {
+      await apiRequest('/api/notifications/read-all', { method: 'PATCH' });
+      state.notifications = state.notifications.map((item) => ({ ...item, unread: false, readAt: new Date().toISOString() }));
+      renderNotifications();
+    } catch {
+      elements.notificationReadAllButton.disabled = false;
+    }
   }
 
   function requireWorkerRole() {
@@ -418,8 +438,33 @@ document.addEventListener('DOMContentLoaded', () => {
     return permit.workState || permit.work_state || state.workStates[permit.id]?.state || 'active';
   }
 
+  function isWorkTimerStopped(permit) {
+    return ['held', 'stopped', 'final_closure', 'sent_for_closure', 'closed'].includes(getWorkState(permit))
+      || permit.status === 'closed'
+      || isFinalClosureSubmitted(permit);
+  }
+
+  function formatFrozenRemaining(permit, fallback) {
+    if (permit.timerRemainingSeconds === null || permit.timerRemainingSeconds === undefined) return fallback;
+    const seconds = Number(permit.timerRemainingSeconds);
+    if (!Number.isFinite(seconds) || seconds < 0) return fallback;
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remainder = Math.floor(seconds % 60);
+    return `${String(hours).padStart(2, '0')}h:${String(minutes).padStart(2, '0')}m:${String(remainder).padStart(2, '0')}s`;
+  }
+
   function setWorkState(permit, status, note = '') {
     const updatedAt = window.PTWTime?.iso?.() || new Date().toISOString();
+    const timerWillStop = ['held', 'stopped', 'final_closure', 'sent_for_closure', 'closed'].includes(status);
+    const timerWasStopped = isWorkTimerStopped(permit);
+    if (timerWillStop && !timerWasStopped) {
+      const endTime = new Date(permit.endDateTime).getTime();
+      permit.timerRemainingSeconds = Number.isNaN(endTime)
+        ? null
+        : Math.max(0, Math.floor((endTime - (window.PTWTime?.now?.() || Date.now())) / 1000));
+      permit.timerPausedAt = updatedAt;
+    }
     state.workStates[permit.id] = {
       state: status,
       note,
@@ -465,6 +510,14 @@ document.addEventListener('DOMContentLoaded', () => {
       return { value: 'STOPPED', label: 'Submitted for final closure', subvalue: '' };
     }
 
+    const workState = getWorkState(permit);
+    if (workState === 'held') {
+      return { value: formatFrozenRemaining(permit, 'PAUSED'), label: 'Timer paused — work on hold', subvalue: '' };
+    }
+    if (workState === 'stopped') {
+      return { value: formatFrozenRemaining(permit, 'STOPPED'), label: 'Timer stopped — stop work active', subvalue: '' };
+    }
+
     const end = new Date(permit.endDateTime);
     if (Number.isNaN(end.getTime())) {
       return { value: '--:--:--', label: 'No end time', subvalue: '' };
@@ -489,7 +542,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function isDueWithinOneHour(permit) {
-    if (isFinalClosureSubmitted(permit)) return false;
+    if (isWorkTimerStopped(permit)) return false;
     const end = new Date(permit.endDateTime);
     if (Number.isNaN(end.getTime())) return false;
     const diff = end.getTime() - (window.PTWTime?.now?.() || Date.now());
@@ -759,7 +812,7 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
     `;
 
-    if (!finalClosure && !permitClosed) {
+    if (!isWorkTimerStopped(permit) && !permitClosed) {
       countdownTimer = setInterval(() => updateCountdown(permit), 1000);
     }
     wireDetailActions(permit);
@@ -1550,11 +1603,15 @@ document.addEventListener('DOMContentLoaded', () => {
       setNotificationPanel(elements.notificationPanel?.hidden);
     });
     elements.notificationCloseButton?.addEventListener('click', () => setNotificationPanel(false));
+    elements.notificationReadAllButton?.addEventListener('click', markAllNotificationsRead);
     elements.notificationList?.addEventListener('click', (event) => {
       const persistentButton = event.target.closest('[data-notification-id]');
       if (persistentButton) {
         const notificationId = persistentButton.dataset.notificationId;
         const link = persistentButton.dataset.notificationLink || '';
+        const type = persistentButton.dataset.notificationType || '';
+        const entityType = persistentButton.dataset.notificationEntityType || '';
+        const entityId = persistentButton.dataset.notificationEntityId || '';
         apiRequest(`/api/notifications/${encodeURIComponent(notificationId)}/read`, { method: 'PATCH' }).catch(() => {});
         state.notifications = state.notifications.map((notification) =>
           notification.id === notificationId ? { ...notification, unread: false } : notification,
@@ -1563,6 +1620,13 @@ document.addEventListener('DOMContentLoaded', () => {
         setNotificationPanel(false);
         if (link && link !== window.location.pathname) {
           window.location.assign(link);
+          return;
+        }
+        if (entityType === 'permit' && entityId && state.permits.some((permit) => permit.id === entityId)) {
+          state.selectedPermitId = entityId;
+          setView(type === 'permit_active' ? 'active' : type === 'permit_closed' ? 'completion' : 'dashboard');
+        } else {
+          setView('dashboard');
         }
         return;
       }

@@ -98,8 +98,9 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '80mb' }));
 
 const ORGANIZATION_ADMIN_ROLE = 'organization_admin';
+const SUPERADMIN_ROLE = 'superadmin';
 const APPLICATION_ROLES = ['requester', 'admin', 'safety_officer', 'supervisor', 'worker'];
-const ROLES = [...APPLICATION_ROLES, 'approver', ORGANIZATION_ADMIN_ROLE];
+const ROLES = [...APPLICATION_ROLES, 'approver', ORGANIZATION_ADMIN_ROLE, SUPERADMIN_ROLE];
 const REVIEW_ROLES = new Set(['supervisor', 'safety_officer', 'approver']);
 const PERMIT_CREATORS = new Set(['requester', 'admin']);
 const ADMIN_ASSIGNABLE_ROLES = APPLICATION_ROLES;
@@ -125,6 +126,7 @@ const PERMIT_WORK_STATES = [
   'sent_for_closure',
   'closed',
 ];
+const TIMER_STOP_WORK_STATES = new Set(['held', 'stopped', 'final_closure', 'sent_for_closure', 'closed']);
 
 const STATUS_TRANSITIONS = {
   draft: ['submitted', 'cancelled'],
@@ -140,7 +142,6 @@ const STATUS_TRANSITIONS = {
 
 const BCRYPT_ROUNDS = 10;
 const REJECTION_SNAPSHOT_HASH_PREFIX = 'v2:';
-const DEFAULT_TEAM_USER_PASSWORD = '12345678';
 
 function nowIso() {
   return new Date().toISOString();
@@ -1383,26 +1384,6 @@ async function backfillOrganizationLinkedRecords() {
   `);
 }
 
-async function activatePendingOrganizationManagedUsers() {
-  await pool.execute(
-    `
-    UPDATE users
-    SET
-      password_hash = ?,
-      account_status = 'active',
-      activation_token = NULL,
-      activation_expires_at = NULL,
-      activated_at = COALESCE(activated_at, ?),
-      updated_at = ?
-    WHERE organization_id IS NOT NULL
-      AND organization_id <> ''
-      AND account_status = 'pending_activation'
-      AND role <> ?
-  `,
-    [hashPassword(DEFAULT_TEAM_USER_PASSWORD), nowIso(), nowIso(), ORGANIZATION_ADMIN_ROLE],
-  );
-}
-
 async function initializeDatabase() {
   const databaseName = escapeDatabaseName(dbConfig.database);
   const setupConnection = await mysql.createConnection({
@@ -1432,10 +1413,83 @@ async function initializeDatabase() {
       name VARCHAR(255) NOT NULL,
       registration_no VARCHAR(120) NOT NULL UNIQUE,
       admin_user_id CHAR(36),
+      contact_email VARCHAR(255),
+      contact_number VARCHAR(80),
+      registered_address TEXT,
+      primary_contact_name VARCHAR(255),
+      service_tier VARCHAR(80),
+      enabled_modules LONGTEXT,
+      status VARCHAR(40) NOT NULL DEFAULT 'pending',
+      notes TEXT,
+      lifecycle_reason TEXT,
+      archived_at VARCHAR(40),
+      activated_at VARCHAR(40),
       created_at VARCHAR(40) NOT NULL,
       updated_at VARCHAR(40) NOT NULL,
       UNIQUE INDEX idx_organizations_registration_no (registration_no),
       INDEX idx_organizations_admin_user_id (admin_user_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  `);
+
+  await ensureTableColumn('organizations', 'contact_email', 'contact_email VARCHAR(255) NULL AFTER admin_user_id');
+  await ensureTableColumn('organizations', 'contact_number', 'contact_number VARCHAR(80) NULL AFTER contact_email');
+  await ensureTableColumn('organizations', 'registered_address', 'registered_address TEXT NULL AFTER contact_number');
+  await ensureTableColumn('organizations', 'primary_contact_name', 'primary_contact_name VARCHAR(255) NULL AFTER registered_address');
+  await ensureTableColumn('organizations', 'service_tier', 'service_tier VARCHAR(80) NULL AFTER primary_contact_name');
+  await ensureTableColumn('organizations', 'enabled_modules', 'enabled_modules LONGTEXT NULL AFTER service_tier');
+  await ensureTableColumn('organizations', 'tenant_settings', 'tenant_settings LONGTEXT NULL AFTER enabled_modules');
+  await ensureTableColumn('organizations', 'status', "status VARCHAR(40) NOT NULL DEFAULT 'active' AFTER contact_email");
+  await ensureTableColumn('organizations', 'notes', 'notes TEXT NULL AFTER status');
+  await ensureTableColumn('organizations', 'lifecycle_reason', 'lifecycle_reason TEXT NULL AFTER notes');
+  await ensureTableColumn('organizations', 'archived_at', 'archived_at VARCHAR(40) NULL AFTER lifecycle_reason');
+  await ensureTableColumn('organizations', 'activated_at', 'activated_at VARCHAR(40) NULL AFTER archived_at');
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS organization_sites (
+      id CHAR(36) PRIMARY KEY,
+      organization_id CHAR(36) NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      code VARCHAR(80) NOT NULL,
+      address TEXT,
+      work_areas LONGTEXT,
+      status VARCHAR(40) NOT NULL DEFAULT 'active',
+      created_at VARCHAR(40) NOT NULL,
+      updated_at VARCHAR(40) NOT NULL,
+      UNIQUE INDEX idx_organization_sites_code (organization_id, code),
+      INDEX idx_organization_sites_org (organization_id),
+      INDEX idx_organization_sites_status (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS platform_audit_logs (
+      id CHAR(36) PRIMARY KEY,
+      occurred_at VARCHAR(40) NOT NULL,
+      actor_user_id CHAR(36),
+      actor_name VARCHAR(255) NOT NULL,
+      actor_role VARCHAR(50) NOT NULL,
+      organization_id CHAR(36),
+      category VARCHAR(80) NOT NULL,
+      action VARCHAR(120) NOT NULL,
+      target_type VARCHAR(80),
+      target_id VARCHAR(120),
+      previous_value LONGTEXT,
+      new_value LONGTEXT,
+      reason TEXT,
+      ip_address VARCHAR(80),
+      result VARCHAR(40) NOT NULL DEFAULT 'success',
+      INDEX idx_platform_audit_occurred (occurred_at),
+      INDEX idx_platform_audit_org (organization_id),
+      INDEX idx_platform_audit_category (category)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS platform_settings (
+      setting_key VARCHAR(120) PRIMARY KEY,
+      setting_value LONGTEXT,
+      updated_by CHAR(36),
+      updated_at VARCHAR(40) NOT NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
   `);
 
@@ -1508,6 +1562,22 @@ async function initializeDatabase() {
   await ensureTableColumn('users', 'country', 'country VARCHAR(120) NULL AFTER postal_code');
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      id CHAR(36) PRIMARY KEY,
+      user_id CHAR(36) NOT NULL,
+      token VARCHAR(128) NOT NULL UNIQUE,
+      ip_address VARCHAR(80),
+      user_agent VARCHAR(500),
+      created_at VARCHAR(40) NOT NULL,
+      last_seen_at VARCHAR(40) NOT NULL,
+      revoked_at VARCHAR(40),
+      INDEX idx_auth_sessions_user (user_id),
+      INDEX idx_auth_sessions_token (token),
+      INDEX idx_auth_sessions_active (revoked_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS permits (
       id CHAR(36) PRIMARY KEY,
       organization_id CHAR(36),
@@ -1530,6 +1600,8 @@ async function initializeDatabase() {
       rejection_snapshot_hash VARCHAR(80),
       status VARCHAR(40) NOT NULL,
       work_state VARCHAR(40) NOT NULL DEFAULT 'not_started',
+      timer_paused_at VARCHAR(40),
+      timer_remaining_seconds INT,
       created_at VARCHAR(40) NOT NULL,
       updated_at VARCHAR(40) NOT NULL,
       INDEX idx_permits_organization_id (organization_id),
@@ -1563,6 +1635,16 @@ async function initializeDatabase() {
     'permits',
     'work_state',
     "work_state VARCHAR(40) NOT NULL DEFAULT 'not_started' AFTER status",
+  );
+  await ensureTableColumn(
+    'permits',
+    'timer_paused_at',
+    'timer_paused_at VARCHAR(40) NULL AFTER work_state',
+  );
+  await ensureTableColumn(
+    'permits',
+    'timer_remaining_seconds',
+    'timer_remaining_seconds INT NULL AFTER timer_paused_at',
   );
 
   await ensureTableColumn('permits', 'work_type', 'work_type VARCHAR(100) NULL AFTER title');
@@ -1651,7 +1733,6 @@ async function initializeDatabase() {
   );
 
   await backfillOrganizationScopedRecords();
-  await activatePendingOrganizationManagedUsers();
 
   const migrationTimestamp = nowIso();
   await pool.execute(
@@ -1766,6 +1847,7 @@ async function initializeDatabase() {
   await backfillOrganizationLinkedRecords();
 
   await seedDemoUsers();
+  await seedPlatformSuperadmin();
   await seedDemoWorkers();
   await syncWorkerUsersFromProfiles();
 }
@@ -1881,6 +1963,10 @@ function rowToPermit(row) {
     rejectionSnapshotHash: row.rejection_snapshot_hash || '',
     status: row.status,
     workState: normalizePermitWorkState(row.work_state, row.status),
+    timerPausedAt: row.timer_paused_at || '',
+    timerRemainingSeconds: row.timer_remaining_seconds === null || row.timer_remaining_seconds === undefined
+      ? null
+      : Math.max(0, Number(row.timer_remaining_seconds) || 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -2359,8 +2445,60 @@ async function getUserByLogin(login) {
 }
 
 async function getUserByToken(token) {
-  const [rows] = await pool.execute('SELECT * FROM users WHERE token = ? LIMIT 1', [token]);
-  return rowToUser(rows[0]);
+  const [sessionRows] = await pool.execute(`
+    SELECT u.* FROM auth_sessions s
+    INNER JOIN users u ON u.id = s.user_id
+    WHERE s.token = ? AND s.revoked_at IS NULL
+    LIMIT 1
+  `, [token]);
+  if (sessionRows[0]) {
+    await pool.execute('UPDATE auth_sessions SET last_seen_at = ? WHERE token = ?', [nowIso(), token]);
+    return rowToUser(sessionRows[0]);
+  }
+  const [legacyRows] = await pool.execute('SELECT * FROM users WHERE token = ? LIMIT 1', [token]);
+  return rowToUser(legacyRows[0]);
+}
+
+async function deliverTenantAdminInvite({ user, tenant, activationLink, activationExpiresAt }) {
+  if (!isSmtpConfigured()) {
+    return { sent: false, status: 'not_configured', reason: 'SMTP email delivery is not configured' };
+  }
+  const transport = createMailTransport();
+  const expiresAt = formatActivationExpiry(activationExpiresAt);
+  try {
+    await transport.sendMail({
+      from: normalizeString(process.env.SMTP_FROM),
+      to: user.email,
+      subject: `Activate your ${tenant.name} PTW Guardian account`,
+      text: `Hello ${user.fullName},\n\nYour company workspace has been created in PTW Guardian. Activate your Tenant Admin account using this single-use link:\n${activationLink}\n\nThis link expires ${expiresAt}.`,
+      html: `<p>Hello ${escapeHtml(user.fullName)},</p><p>Your company workspace <strong>${escapeHtml(tenant.name)}</strong> has been created in PTW Guardian.</p><p><a href="${escapeHtml(activationLink)}">Activate your Tenant Admin account</a></p><p>This single-use link expires ${escapeHtml(expiresAt)}.</p>`,
+    });
+    return { sent: true, status: 'sent', to: user.email };
+  } catch (error) {
+    return { sent: false, status: 'failed', reason: error.message };
+  }
+}
+
+async function createAuthSession(userId, token, req, connection = pool) {
+  const timestamp = nowIso();
+  await connection.execute(`
+    INSERT INTO auth_sessions (id, user_id, token, ip_address, user_agent, created_at, last_seen_at, revoked_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+  `, [
+    createId(), userId, token,
+    normalizeString(req?.ip || req?.socket?.remoteAddress) || null,
+    normalizeString(req?.headers?.['user-agent']).slice(0, 500) || null,
+    timestamp, timestamp,
+  ]);
+}
+
+async function revokeAuthToken(token, connection = pool) {
+  await connection.execute('UPDATE auth_sessions SET revoked_at = ? WHERE token = ? AND revoked_at IS NULL', [nowIso(), token]);
+}
+
+async function revokeUserSessions(userId, connection = pool) {
+  await connection.execute('UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL', [nowIso(), userId]);
+  await connection.execute('UPDATE users SET token = NULL, updated_at = ? WHERE id = ?', [nowIso(), userId]);
 }
 
 async function hasInactiveWorkerProfile(user, connection = pool) {
@@ -3103,6 +3241,83 @@ async function seedDemoUsers() {
   }
 }
 
+async function seedPlatformSuperadmin() {
+  const email = normalizeEmail(process.env.SUPERADMIN_EMAIL || (process.env.NODE_ENV === 'production' ? '' : 'superadmin@example.com'));
+  const password = normalizeString(process.env.SUPERADMIN_PASSWORD || (process.env.NODE_ENV === 'production' ? '' : 'platform12345'));
+  if (!email || !password) return;
+
+  const existing = await getUserByEmail(email);
+  if (existing) return;
+
+  await insertUser({
+    employeeId: 'SA-0001',
+    fullName: normalizeString(process.env.SUPERADMIN_NAME) || 'Platform Superadmin',
+    email,
+    organization: 'PTW Guardian Platform',
+    role: SUPERADMIN_ROLE,
+    roles: [SUPERADMIN_ROLE],
+    password,
+  });
+}
+
+function organizationRowToPlatformTenant(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    registrationNo: row.registration_no,
+    contactEmail: row.contact_email || '',
+    contactNumber: row.contact_number || '',
+    registeredAddress: row.registered_address || '',
+    primaryContactName: row.primary_contact_name || '',
+    serviceTier: row.service_tier || 'standard',
+    enabledModules: decodeJson(row.enabled_modules),
+    tenantSettings: decodeJson(row.tenant_settings, {}),
+    status: row.status || 'active',
+    notes: row.notes || '',
+    lifecycleReason: row.lifecycle_reason || '',
+    archivedAt: row.archived_at || '',
+    activatedAt: row.activated_at || '',
+    adminUserId: row.admin_user_id || '',
+    adminName: row.admin_name || '',
+    adminEmail: row.admin_email || '',
+    adminStatus: row.admin_status || '',
+    userCount: Number(row.user_count) || 0,
+    permitCount: Number(row.permit_count) || 0,
+    lastActivityAt: row.last_activity_at || row.updated_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function recordPlatformAudit(actor, event, req = null, connection = pool) {
+  const id = createId();
+  await connection.execute(`
+    INSERT INTO platform_audit_logs (
+      id, occurred_at, actor_user_id, actor_name, actor_role, organization_id,
+      category, action, target_type, target_id, previous_value, new_value,
+      reason, ip_address, result
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `, [
+    id,
+    nowIso(),
+    actor?.id || null,
+    actor?.fullName || actor?.email || 'System',
+    actor?.role || 'system',
+    event.organizationId || null,
+    event.category || 'administration',
+    event.action,
+    event.targetType || null,
+    event.targetId || null,
+    event.previousValue == null ? null : encodeJson(event.previousValue),
+    event.newValue == null ? null : encodeJson(event.newValue),
+    normalizeString(event.reason) || null,
+    normalizeString(req?.ip || req?.socket?.remoteAddress) || null,
+    event.result || 'success',
+  ]);
+  return id;
+}
+
 async function seedDemoWorkers() {
   const adminUser = await getUserByEmail('admin@example.com');
   const demoWorkers = [
@@ -3752,6 +3967,10 @@ async function updatePermitStatus(permit, nextStatus, user, comment, options = {
       updateValues.push(statusWorkState);
     }
 
+    if (nextStatus === 'active') {
+      updateFields.push('timer_paused_at = NULL', 'timer_remaining_seconds = NULL');
+    }
+
     if (releaseStartDateTime && releaseEndDateTime) {
       updateFields.push('start_date_time = ?', 'end_date_time = ?');
       updateValues.push(releaseStartDateTime, releaseEndDateTime);
@@ -3797,12 +4016,56 @@ async function updatePermitWorkState(permit, nextWorkState, user, comment = '') 
   try {
     await connection.beginTransaction();
     const timestamp = nowIso();
+    const timerWasStopped = TIMER_STOP_WORK_STATES.has(currentWorkState);
+    const timerWillStop = TIMER_STOP_WORK_STATES.has(normalizedWorkState);
+    const updateFields = ['work_state = ?', 'updated_at = ?'];
+    const updateValues = [normalizedWorkState, timestamp];
 
-    await connection.execute('UPDATE permits SET work_state = ?, updated_at = ? WHERE id = ?', [
-      normalizedWorkState,
-      timestamp,
-      permit.id,
-    ]);
+    if (timerWillStop && !timerWasStopped) {
+      const endTime = new Date(permit.endDateTime).getTime();
+      const remainingSeconds = Number.isNaN(endTime)
+        ? 0
+        : Math.max(0, Math.floor((endTime - Date.now()) / 1000));
+      updateFields.push('timer_paused_at = ?', 'timer_remaining_seconds = ?');
+      updateValues.push(timestamp, remainingSeconds);
+    } else if (!timerWillStop && timerWasStopped) {
+      const hasStoredRemaining = permit.timerRemainingSeconds !== null
+        && permit.timerRemainingSeconds !== undefined
+        && Number.isFinite(Number(permit.timerRemainingSeconds));
+      let remainingSeconds = hasStoredRemaining
+        ? Math.max(0, Number(permit.timerRemainingSeconds))
+        : null;
+
+      if (remainingSeconds === null) {
+        const [pauseRows] = await connection.execute(
+          `
+          SELECT occurred_at
+          FROM audit_logs
+          WHERE permit_id = ?
+            AND action = 'work state changed'
+            AND to_status IN ('held', 'stopped', 'final_closure', 'sent_for_closure')
+          ORDER BY occurred_at DESC
+          LIMIT 1
+          `,
+          [permit.id],
+        );
+        const pausedAt = new Date(permit.timerPausedAt || pauseRows[0]?.occurred_at || '').getTime();
+        const originalEnd = new Date(permit.endDateTime).getTime();
+        remainingSeconds = Number.isNaN(pausedAt) || Number.isNaN(originalEnd)
+          ? 0
+          : Math.max(0, Math.floor((originalEnd - pausedAt) / 1000));
+      }
+
+      const resumedEndTime = new Date(Date.now() + remainingSeconds * 1000).toISOString();
+      updateFields.push('end_date_time = ?', 'timer_paused_at = NULL', 'timer_remaining_seconds = NULL');
+      updateValues.push(resumedEndTime);
+    }
+
+    updateValues.push(permit.id);
+    await connection.execute(
+      `UPDATE permits SET ${updateFields.join(', ')} WHERE id = ?`,
+      updateValues,
+    );
 
     await insertAuditLog(
       {
@@ -3838,6 +4101,39 @@ function isAdmin(user) {
 
 function isOrganizationAdmin(user) {
   return hasRole(user, ORGANIZATION_ADMIN_ROLE);
+}
+
+function isSuperadmin(user) {
+  return hasRole(user, SUPERADMIN_ROLE);
+}
+
+const DEFAULT_PLATFORM_OWNER_NAME = 'UPTIME PRO ENGINEERING SDN. BHD.';
+
+async function getPlatformOwnerProfile(user, connection = pool) {
+  const [rows] = await connection.execute(
+    'SELECT setting_value FROM platform_settings WHERE setting_key = ? LIMIT 1',
+    ['platformOwnerProfile'],
+  );
+  const stored = rows[0] ? decodeJson(rows[0].setting_value) : {};
+  const profile = stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
+  const savedOrganization = normalizeString(user?.organization);
+
+  return {
+    companyName: normalizeString(profile.companyName)
+      || (savedOrganization && savedOrganization !== 'PTW Guardian Platform' ? savedOrganization : DEFAULT_PLATFORM_OWNER_NAME),
+    registrationNo: normalizeString(profile.registrationNo) || normalizeString(user?.companyRegistrationNo),
+    companyEmail: normalizeEmail(profile.companyEmail),
+    contactNumber: normalizeString(profile.contactNumber),
+    website: normalizeString(profile.website),
+    registeredAddress: normalizeString(profile.registeredAddress),
+  };
+}
+
+function requireSuperadmin(req, res, next) {
+  if (!isSuperadmin(req.user)) {
+    return res.status(403).json({ error: 'Platform Superadmin access is required' });
+  }
+  next();
 }
 
 function isReviewer(user) {
@@ -4486,7 +4782,15 @@ async function authenticate(req, res, next) {
     return res.status(403).json({ error: ACCOUNT_PENDING_ACTIVATION_MESSAGE });
   }
 
+  if (user.organizationId && !isSuperadmin(user)) {
+    const tenant = await getOrganizationById(user.organizationId);
+    if (tenant && ['inactive', 'suspended', 'archived'].includes(tenant.status)) {
+      return res.status(403).json({ error: `Organization workspace is ${tenant.status}` });
+    }
+  }
+
   req.user = user;
+  req.authToken = token;
   next();
 }
 
@@ -4517,6 +4821,9 @@ function registerNoCacheFileRoute(route, filePath) {
 
 async function resetForTests() {
   await ready;
+  await pool.query('DELETE FROM platform_audit_logs');
+  await pool.query('DELETE FROM platform_settings');
+  await pool.query('DELETE FROM auth_sessions');
   await pool.query('DELETE FROM notifications');
   await pool.query('DELETE FROM extension_requests');
   await pool.query('DELETE FROM audit_logs');
@@ -4525,6 +4832,7 @@ async function resetForTests() {
   await pool.query('DELETE FROM users');
   await pool.query('DELETE FROM organizations');
   await seedDemoUsers();
+  await seedPlatformSuperadmin();
 }
 
 async function closeDb() {
@@ -4548,6 +4856,8 @@ app.use('/uploads/profile-pictures', express.static(PROFILE_PICTURE_UPLOAD_DIR))
   ['/admin.js', roleFile('admin', 'admin.js')],
   ['/organization.css', roleFile('organization-admin', 'organization.css')],
   ['/organization.js', roleFile('organization-admin', 'organization.js')],
+  ['/superadmin.css', roleFile('superadmin', 'superadmin.css')],
+  ['/superadmin.js', roleFile('superadmin', 'superadmin.js')],
   ['/safety.css', roleFile('safety-officer', 'safety.css')],
   ['/safety.js', roleFile('safety-officer', 'safety.js')],
   ['/supervisor.css', roleFile('supervisor', 'supervisor.css')],
@@ -4591,8 +4901,12 @@ app.get('/api/server-time', (req, res) => {
   });
 });
 
-app.get(['/', '/index.html', '/login', '/login.html', '/signup', '/signup.html'], (req, res) => {
+app.get(['/', '/index.html', '/login', '/login.html'], (req, res) => {
   sendNoCacheFile(res, authFile('sign-in-sign-up', 'index.html'));
+});
+
+app.get(['/signup', '/signup.html'], (req, res) => {
+  res.redirect(302, '/login');
 });
 
 app.get(['/activate', '/activate.html'], (req, res) => {
@@ -4609,6 +4923,10 @@ app.get(['/account', '/account.html'], (req, res) => {
 
 app.get(['/organization', '/organization.html'], (req, res) => {
   sendNoCacheFile(res, roleFile('organization-admin', 'organization.html'));
+});
+
+app.get(['/superadmin', '/superadmin.html'], (req, res) => {
+  sendNoCacheFile(res, roleFile('superadmin', 'superadmin.html'));
 });
 
 app.get(['/support', '/support.html'], (req, res) => {
@@ -4641,6 +4959,11 @@ app.use(express.static(PROJECT_SOURCE_DIR, {
 }));
 
 app.post('/api/auth/signup', async (req, res) => {
+  return res.status(403).json({
+    error: 'Public company registration is disabled. Contact the platform operator for tenant onboarding.',
+  });
+
+  /* Kept below temporarily for migration reference; tenant creation now belongs to Superadmin. */
   const { fullName, email, organization, companyRegistrationNo, password, confirmPassword, acceptTerms } = req.body || {};
 
   if (!fullName || !email || !organization || !companyRegistrationNo || !password || !acceptTerms) {
@@ -4669,6 +4992,7 @@ app.post('/api/auth/signup', async (req, res) => {
 
   const token = createRandomToken();
   await updateUserToken(registration.user.id, token);
+  await createAuthSession(registration.user.id, token, req);
   const user = await getUserById(registration.user.id);
 
   return res.status(201).json({
@@ -4706,12 +5030,32 @@ app.post('/api/auth/login', async (req, res) => {
     });
   }
 
+  if (user?.organizationId && !isSuperadmin(user)) {
+    const tenant = await getOrganizationById(user.organizationId);
+    if (tenant && ['inactive', 'suspended', 'archived'].includes(tenant.status)) {
+      return res.status(403).json({
+        error: `Your organization workspace is ${tenant.status}. Contact your Tenant Admin.`,
+      });
+    }
+  }
+
   if (!user || !verifyPassword(password, user.passwordHash)) {
+    await recordPlatformAudit(
+      { fullName: normalizeString(login) || 'Unknown account', role: 'unauthenticated' },
+      { organizationId: user?.organizationId || null, category: 'security', action: 'authentication.login_failed', targetType: 'account', targetId: normalizeString(login), result: 'failed', reason: 'Invalid credentials' },
+      req,
+    );
     return res.status(401).json({ error: 'Invalid credentials' });
   }
 
   const token = createRandomToken();
   await updateUserToken(user.id, token);
+  await createAuthSession(user.id, token, req);
+  if (isSuperadmin(user)) {
+    await recordPlatformAudit(user, { category: 'security', action: 'authentication.superadmin_login', targetType: 'user', targetId: user.id }, req);
+  } else if (user.organizationId) {
+    await recordPlatformAudit(user, { organizationId: user.organizationId, category: 'security', action: 'authentication.tenant_login', targetType: 'user', targetId: user.id }, req);
+  }
 
   return res.json({
     user: sanitizeUser({ ...user, token }),
@@ -4737,6 +5081,7 @@ app.post('/api/auth/activate', async (req, res) => {
 
   const authToken = createRandomToken();
   await updateUserToken(activation.user.id, authToken);
+  await createAuthSession(activation.user.id, authToken, req);
   const user = await getUserById(activation.user.id);
 
   res.json({
@@ -4747,6 +5092,584 @@ app.post('/api/auth/activate', async (req, res) => {
 
 app.get('/api/auth/me', authenticate, (req, res) => {
   res.json({ user: sanitizeUser(req.user) });
+});
+
+app.get('/api/platform/overview', authenticate, requireSuperadmin, async (req, res) => {
+  const [[tenantCounts], [userCounts], [permitCounts], [alertCounts], [recentRows]] = await Promise.all([
+    pool.query(`SELECT COUNT(*) AS total,
+      SUM(status = 'active') AS active,
+      SUM(status = 'pending') AS pending,
+      SUM(status IN ('inactive', 'suspended')) AS suspended
+      FROM organizations WHERE status <> 'archived'`),
+    pool.query(`SELECT COUNT(*) AS total FROM users WHERE organization_id IS NOT NULL`),
+    pool.query(`SELECT COUNT(*) AS total, SUM(status = 'active') AS active FROM permits`),
+    pool.query(`SELECT COUNT(*) AS total FROM platform_audit_logs
+      WHERE category = 'security' AND result <> 'success'
+      AND occurred_at >= DATE_FORMAT(DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR), '%Y-%m-%dT%H:%i:%s')`),
+    pool.query(`SELECT * FROM platform_audit_logs ORDER BY occurred_at DESC LIMIT 8`),
+  ]);
+  res.json({
+    metrics: {
+      totalTenants: Number(tenantCounts[0]?.total) || 0,
+      activeTenants: Number(tenantCounts[0]?.active) || 0,
+      pendingTenants: Number(tenantCounts[0]?.pending) || 0,
+      suspendedTenants: Number(tenantCounts[0]?.suspended) || 0,
+      tenantUsers: Number(userCounts[0]?.total) || 0,
+      totalPermits: Number(permitCounts[0]?.total) || 0,
+      activePermits: Number(permitCounts[0]?.active) || 0,
+      securityAlerts: Number(alertCounts[0]?.total) || 0,
+    },
+    recentActivity: recentRows,
+  });
+});
+
+app.get('/api/platform/tenants', authenticate, requireSuperadmin, async (req, res) => {
+  const query = normalizeString(req.query.q).toLowerCase();
+  const status = normalizeString(req.query.status).toLowerCase();
+  const params = [];
+  const where = [];
+  if (query) {
+    where.push('(LOWER(o.id) LIKE ? OR LOWER(o.name) LIKE ? OR LOWER(o.registration_no) LIKE ? OR LOWER(COALESCE(o.contact_email, \'\')) LIKE ?)');
+    params.push(`%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`);
+  }
+  if (status && ['pending', 'active', 'inactive', 'suspended', 'archived'].includes(status)) {
+    where.push(status === 'inactive' ? "o.status IN ('inactive', 'suspended')" : 'o.status = ?');
+    if (status !== 'inactive') params.push(status);
+  }
+  const [rows] = await pool.execute(`
+    SELECT o.*,
+      a.full_name AS admin_name, a.email AS admin_email, a.account_status AS admin_status,
+      (SELECT COUNT(*) FROM users u WHERE u.organization_id = o.id) AS user_count,
+      (SELECT COUNT(*) FROM permits p WHERE p.organization_id = o.id) AS permit_count,
+      (SELECT MAX(p2.updated_at) FROM permits p2 WHERE p2.organization_id = o.id) AS last_activity_at
+    FROM organizations o
+    LEFT JOIN users a ON a.id = o.admin_user_id
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY FIELD(o.status, 'inactive', 'suspended', 'active', 'archived', 'pending'), o.created_at DESC
+  `, params);
+  res.json({ count: rows.length, tenants: rows.map(organizationRowToPlatformTenant) });
+});
+
+app.post('/api/platform/tenants', authenticate, requireSuperadmin, async (req, res) => {
+  const { name, registrationNo, contactEmail, contactNumber, registeredAddress, primaryContactName, serviceTier, enabledModules, adminName, adminEmail, adminPassword, adminPasswordConfirm, notes } = req.body || {};
+  if (![name, registrationNo, contactEmail, contactNumber, registeredAddress, primaryContactName, serviceTier, adminName, adminEmail, adminPassword].every((value) => normalizeString(value))) {
+    return res.status(400).json({ error: 'Complete all required company and Tenant Admin information, including the login password' });
+  }
+  if (String(adminPassword).length < 8) {
+    return res.status(400).json({ error: 'Tenant Admin password must be at least 8 characters' });
+  }
+  if (adminPassword !== adminPasswordConfirm) {
+    return res.status(400).json({ error: 'Tenant Admin passwords do not match' });
+  }
+  const existingTenant = await getOrganizationByRegistrationNo(registrationNo);
+  const existingAdmin = await getUserByEmail(adminEmail);
+  const canCompleteLegacyOnboarding = existingTenant
+    && existingAdmin
+    && existingTenant.status === 'pending'
+    && existingAdmin.accountStatus === 'pending_activation'
+    && existingAdmin.organizationId === existingTenant.id;
+  if (canCompleteLegacyOnboarding) {
+    const modules = Array.isArray(enabledModules) ? enabledModules.map(normalizeString).filter(Boolean) : [normalizeString(enabledModules)].filter(Boolean);
+    const activatedAt = nowIso();
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.execute(`UPDATE organizations SET name = ?, contact_email = ?, contact_number = ?, registered_address = ?, primary_contact_name = ?, service_tier = ?, enabled_modules = ?, status = 'active', activated_at = ?, archived_at = NULL, lifecycle_reason = NULL, notes = ?, updated_at = ? WHERE id = ?`, [
+        normalizeString(name), normalizeEmail(contactEmail), normalizeString(contactNumber), normalizeString(registeredAddress), normalizeString(primaryContactName),
+        normalizeString(serviceTier), encodeJson(modules), activatedAt, normalizeString(notes) || null, activatedAt, existingTenant.id,
+      ]);
+      await connection.execute(`UPDATE users SET full_name = ?, organization = ?, password_hash = ?, account_status = 'active', activation_token = NULL, activation_expires_at = NULL, updated_at = ? WHERE id = ?`, [
+        normalizeString(adminName), normalizeString(name), hashPassword(String(adminPassword)), activatedAt, existingAdmin.id,
+      ]);
+      await recordPlatformAudit(req.user, {
+        organizationId: existingTenant.id,
+        category: 'tenant_lifecycle', action: 'tenant.onboarding_completed', targetType: 'organization', targetId: existingTenant.id,
+        previousValue: { status: existingTenant.status, adminStatus: existingAdmin.accountStatus },
+        newValue: { status: 'active', adminStatus: 'active', adminEmail: normalizeEmail(adminEmail) },
+        reason: 'Completed an interrupted tenant creation',
+      }, req, connection);
+      await connection.commit();
+      return res.json({
+        tenant: organizationRowToPlatformTenant({ ...existingTenant, name: normalizeString(name), status: 'active', activated_at: activatedAt }),
+        admin: sanitizeUser(await getUserById(existingAdmin.id)),
+        message: 'Tenant creation completed and activated. The Tenant Admin can sign in immediately.',
+      });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+  if (existingTenant) {
+    return res.status(409).json({
+      error: `Registration number already belongs to ${existingTenant.name}. Open the existing tenant to restore, unarchive, or update it.`,
+      code: 'TENANT_REGISTRATION_EXISTS',
+      existingTenant: organizationRowToPlatformTenant(existingTenant),
+    });
+  }
+  if (existingAdmin) {
+    return res.status(409).json({
+      error: `This email already belongs to ${existingAdmin.organization || 'an existing account'}. Use the existing tenant record or a different primary Tenant Admin email.`,
+      code: 'TENANT_ADMIN_EMAIL_EXISTS',
+      existingOrganizationId: existingAdmin.organizationId || '',
+    });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const organization = await createOrganizationWorkspace({ name, registrationNo }, connection);
+    const modules = Array.isArray(enabledModules) ? enabledModules.map(normalizeString).filter(Boolean) : [normalizeString(enabledModules)].filter(Boolean);
+    const activatedAt = nowIso();
+    await connection.execute(`UPDATE organizations SET contact_email = ?, contact_number = ?, registered_address = ?, primary_contact_name = ?, service_tier = ?, enabled_modules = ?, status = 'active', activated_at = ?, notes = ? WHERE id = ?`, [
+      normalizeEmail(contactEmail), normalizeString(contactNumber), normalizeString(registeredAddress), normalizeString(primaryContactName),
+      normalizeString(serviceTier), encodeJson(modules), activatedAt, normalizeString(notes) || null, organization.id,
+    ]);
+    const admin = await insertUser({
+      fullName: adminName,
+      email: adminEmail,
+      organization: name,
+      organizationId: organization.id,
+      companyRegistrationNo: registrationNo,
+      role: ORGANIZATION_ADMIN_ROLE,
+      roles: [ORGANIZATION_ADMIN_ROLE],
+      password: String(adminPassword),
+    }, connection);
+    await connection.execute('UPDATE organizations SET admin_user_id = ?, updated_at = ? WHERE id = ?', [admin.id, nowIso(), organization.id]);
+    await recordPlatformAudit(req.user, {
+      organizationId: organization.id,
+      category: 'tenant_lifecycle', action: 'tenant.created', targetType: 'organization', targetId: organization.id,
+      newValue: { name: normalizeString(name), registrationNo: normalizeString(registrationNo), contactEmail: normalizeEmail(contactEmail), contactNumber: normalizeString(contactNumber), registeredAddress: normalizeString(registeredAddress), primaryContactName: normalizeString(primaryContactName), serviceTier: normalizeString(serviceTier), enabledModules: modules, adminEmail: normalizeEmail(adminEmail) },
+      reason: 'New customer onboarding',
+    }, req, connection);
+    await connection.commit();
+    res.status(201).json({
+      tenant: organizationRowToPlatformTenant({ ...organization, contact_email: normalizeEmail(contactEmail), contact_number: contactNumber, registered_address: registeredAddress, primary_contact_name: primaryContactName, service_tier: serviceTier, enabled_modules: encodeJson(modules), status: 'active', activated_at: activatedAt, notes }),
+      admin: sanitizeUser(await getUserById(admin.id)),
+      message: 'Tenant created and activated. The Tenant Admin can sign in immediately.',
+    });
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+});
+
+app.patch('/api/platform/tenants/:id', authenticate, requireSuperadmin, async (req, res) => {
+  const existing = await getOrganizationById(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Tenant not found' });
+  const name = normalizeString(req.body?.name) || existing.name;
+  const registrationNo = normalizeString(req.body?.registrationNo) || existing.registration_no;
+  const duplicate = await getOrganizationByRegistrationNo(registrationNo);
+  if (duplicate && duplicate.id !== existing.id) return res.status(409).json({ error: 'Registration number is already in use' });
+  const modules = Object.prototype.hasOwnProperty.call(req.body || {}, 'enabledModules') ? (Array.isArray(req.body.enabledModules) ? req.body.enabledModules : [req.body.enabledModules]) : decodeJson(existing.enabled_modules);
+  await pool.execute(`UPDATE organizations SET name = ?, registration_no = ?, contact_email = ?, contact_number = ?, registered_address = ?, primary_contact_name = ?, service_tier = ?, enabled_modules = ?, notes = ?, updated_at = ? WHERE id = ?`, [
+    name, registrationNo, normalizeEmail(req.body?.contactEmail || existing.contact_email), normalizeString(req.body?.contactNumber || existing.contact_number),
+    normalizeString(req.body?.registeredAddress || existing.registered_address), normalizeString(req.body?.primaryContactName || existing.primary_contact_name),
+    normalizeString(req.body?.serviceTier || existing.service_tier || 'standard'), encodeJson(modules),
+    normalizeString(req.body?.notes ?? existing.notes) || null, nowIso(), existing.id,
+  ]);
+  await pool.execute(`UPDATE users SET organization = ?, company_registration_no = ?, updated_at = ? WHERE organization_id = ?`, [name, registrationNo, nowIso(), existing.id]);
+  await recordPlatformAudit(req.user, { organizationId: existing.id, category: 'tenant_administration', action: 'tenant.updated', targetType: 'organization', targetId: existing.id, previousValue: existing, newValue: req.body || {}, reason: req.body?.reason }, req);
+  res.json({ tenant: organizationRowToPlatformTenant(await getOrganizationById(existing.id)) });
+});
+
+app.patch('/api/platform/tenants/:id/status', authenticate, requireSuperadmin, async (req, res) => {
+  const existing = await getOrganizationById(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Tenant not found' });
+  const status = normalizeString(req.body?.status).toLowerCase();
+  const reason = normalizeString(req.body?.reason);
+  if (!['active', 'inactive', 'archived'].includes(status)) return res.status(400).json({ error: 'Invalid tenant status' });
+  if (!reason) return res.status(400).json({ error: 'A reason is required for tenant lifecycle changes' });
+  await pool.execute(`UPDATE organizations SET status = ?, lifecycle_reason = ?, archived_at = ?, activated_at = CASE WHEN ? = 'active' THEN COALESCE(activated_at, ?) ELSE activated_at END, updated_at = ? WHERE id = ?`, [
+    status, reason, status === 'archived' ? nowIso() : null, status, nowIso(), nowIso(), existing.id,
+  ]);
+  if (status === 'inactive' || status === 'archived') {
+    await pool.execute(`UPDATE users SET token = NULL, updated_at = ? WHERE organization_id = ?`, [nowIso(), existing.id]);
+    await pool.execute(`UPDATE auth_sessions s INNER JOIN users u ON u.id = s.user_id SET s.revoked_at = ? WHERE u.organization_id = ? AND s.revoked_at IS NULL`, [nowIso(), existing.id]);
+  }
+  await recordPlatformAudit(req.user, { organizationId: existing.id, category: 'tenant_lifecycle', action: `tenant.${status}`, targetType: 'organization', targetId: existing.id, previousValue: { status: existing.status }, newValue: { status }, reason }, req);
+  res.json({ tenant: organizationRowToPlatformTenant(await getOrganizationById(existing.id)) });
+});
+
+app.delete('/api/platform/tenants/:id', authenticate, requireSuperadmin, async (req, res) => {
+  const existing = await getOrganizationById(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Tenant not found' });
+  const reason = normalizeString(req.body?.reason);
+  if (!reason) return res.status(400).json({ error: 'A reason is required to delete a tenant' });
+  if (!['inactive', 'archived', 'pending'].includes(existing.status)) {
+    return res.status(409).json({ error: 'Only inactive or archived tenants can be deleted. Deactivate or archive the tenant first.' });
+  }
+
+  const [[permitRows], [workerRows], [auditRows], [userRows]] = await Promise.all([
+    pool.query('SELECT COUNT(*) AS count FROM permits WHERE organization_id = ?', [existing.id]),
+    pool.query('SELECT COUNT(*) AS count FROM workers WHERE organization_id = ?', [existing.id]),
+    pool.query('SELECT COUNT(*) AS count FROM audit_logs WHERE organization_id = ?', [existing.id]),
+    pool.query('SELECT COUNT(*) AS count FROM users WHERE organization_id = ?', [existing.id]),
+  ]);
+  const history = {
+    permits: Number(permitRows[0]?.count) || 0,
+    workers: Number(workerRows[0]?.count) || 0,
+    auditRecords: Number(auditRows[0]?.count) || 0,
+    users: Number(userRows[0]?.count) || 0,
+  };
+  if (history.permits || history.workers || history.auditRecords || history.users > 1) {
+    return res.status(409).json({
+      error: 'This tenant has operational history and cannot be permanently deleted. Keep it archived to preserve compliance records.',
+      history,
+    });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [users] = await connection.execute('SELECT id FROM users WHERE organization_id = ?', [existing.id]);
+    for (const user of users) {
+      await connection.execute('DELETE FROM notifications WHERE user_id = ?', [user.id]);
+      await connection.execute('DELETE FROM auth_sessions WHERE user_id = ?', [user.id]);
+    }
+    await connection.execute('DELETE FROM users WHERE organization_id = ?', [existing.id]);
+    await connection.execute('DELETE FROM organizations WHERE id = ?', [existing.id]);
+    await recordPlatformAudit(req.user, {
+      organizationId: existing.id,
+      category: 'tenant_lifecycle', action: 'tenant.deleted', targetType: 'organization', targetId: existing.id,
+      previousValue: { name: existing.name, registrationNo: existing.registration_no, status: existing.status },
+      reason,
+    }, req, connection);
+    await connection.commit();
+    res.json({ status: 'deleted', id: existing.id });
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+});
+
+app.post('/api/platform/tenants/:id/resend-invite', authenticate, requireSuperadmin, async (req, res) => {
+  const tenant = await getOrganizationById(req.params.id);
+  if (!tenant?.admin_user_id) return res.status(404).json({ error: 'Tenant Admin not found' });
+  const token = createActivationToken();
+  const expiresAt = createActivationExpiry();
+  await pool.execute(`UPDATE users SET account_status = 'pending_activation', activation_token = ?, activation_expires_at = ?, token = NULL, updated_at = ? WHERE id = ?`, [token, expiresAt, nowIso(), tenant.admin_user_id]);
+  await recordPlatformAudit(req.user, { organizationId: tenant.id, category: 'tenant_administration', action: 'tenant_admin.invitation_resent', targetType: 'user', targetId: tenant.admin_user_id, reason: normalizeString(req.body?.reason) || 'Invitation reissued' }, req);
+  res.json({ activation: { expiresAt, link: buildActivationLink(req, token) } });
+});
+
+app.get('/api/platform/admins', authenticate, requireSuperadmin, async (req, res) => {
+  const [rows] = await pool.execute(`SELECT * FROM users WHERE role = ? OR roles LIKE ? ORDER BY full_name`, [SUPERADMIN_ROLE, `%${SUPERADMIN_ROLE}%`]);
+  res.json({ admins: rows.map(rowToUser).map(sanitizeUser) });
+});
+
+app.get('/api/platform/audit', authenticate, requireSuperadmin, async (req, res) => {
+  const category = normalizeString(req.query.category);
+  const organizationId = normalizeString(req.query.organizationId);
+  const params = [];
+  const where = [];
+  if (category && category !== 'permit_workflow') { where.push('category = ?'); params.push(category); }
+  if (organizationId) { where.push('organization_id = ?'); params.push(organizationId); }
+  const [platformRows] = category === 'permit_workflow'
+    ? [[]]
+    : await pool.execute(`SELECT * FROM platform_audit_logs ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY occurred_at DESC LIMIT 250`, params);
+  let workflowRows = [];
+  if (organizationId && (!category || category === 'permit_workflow')) {
+    const [rows] = await pool.execute(`
+      SELECT id, occurred_at, actor_user_id, actor_name, actor_role, organization_id,
+        'permit_workflow' AS category, action, 'permit' AS target_type, permit_id AS target_id,
+        NULL AS previous_value, NULL AS new_value, comment AS reason, NULL AS ip_address, 'success' AS result
+      FROM audit_logs
+      WHERE organization_id = ?
+      ORDER BY occurred_at DESC
+      LIMIT 250
+    `, [organizationId]);
+    workflowRows = rows;
+  }
+  const logs = [...platformRows, ...workflowRows]
+    .sort((a, b) => String(b.occurred_at).localeCompare(String(a.occurred_at)))
+    .slice(0, 250);
+  res.json({ count: logs.length, logs });
+});
+
+app.get('/api/platform/security', authenticate, requireSuperadmin, async (req, res) => {
+  const organizationId = normalizeString(req.query.organizationId);
+  if (!organizationId) return res.json({ organizationId: '', sessions: [], lockedAccounts: [], events: [] });
+  const tenant = await getOrganizationById(organizationId);
+  if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+  const [[sessions], [locked], [events]] = await Promise.all([
+    pool.query(`
+      SELECT s.id AS session_id, u.id, u.full_name, u.email, u.role, u.organization, s.last_seen_at AS updated_at
+      FROM auth_sessions s INNER JOIN users u ON u.id = s.user_id
+      WHERE s.revoked_at IS NULL AND u.organization_id = ?
+      UNION ALL
+      SELECT NULL AS session_id, u.id, u.full_name, u.email, u.role, u.organization, u.updated_at
+      FROM users u
+      WHERE u.token IS NOT NULL AND u.organization_id = ?
+        AND NOT EXISTS (SELECT 1 FROM auth_sessions s2 WHERE s2.user_id = u.id AND s2.revoked_at IS NULL)
+      ORDER BY updated_at DESC LIMIT 50
+    `, [organizationId, organizationId]),
+    pool.query(`SELECT id, full_name, email, organization, account_status, updated_at FROM users WHERE account_status = 'inactive' AND organization_id = ? ORDER BY updated_at DESC LIMIT 50`, [organizationId]),
+    pool.query(`SELECT * FROM platform_audit_logs WHERE category = 'security' AND organization_id = ? ORDER BY occurred_at DESC LIMIT 100`, [organizationId]),
+  ]);
+  res.json({ organizationId, tenant: organizationRowToPlatformTenant(tenant), sessions, lockedAccounts: locked, events });
+});
+
+app.delete('/api/platform/sessions/:userId', authenticate, requireSuperadmin, async (req, res) => {
+  const target = await getUserById(req.params.userId);
+  if (!target) return res.status(404).json({ error: 'Session account not found' });
+  await revokeUserSessions(target.id);
+  await recordPlatformAudit(req.user, { organizationId: target.organizationId, category: 'security', action: 'session.revoked', targetType: 'user', targetId: target.id, reason: normalizeString(req.body?.reason) || 'Administrative session revocation' }, req);
+  res.json({ status: 'revoked' });
+});
+
+app.get('/api/platform/health', authenticate, requireSuperadmin, async (req, res) => {
+  const started = Date.now();
+  await pool.query('SELECT 1');
+  const [[counts], [storage]] = await Promise.all([
+    pool.query(`SELECT (SELECT COUNT(*) FROM users) AS users, (SELECT COUNT(*) FROM permits) AS permits, (SELECT COUNT(*) FROM notifications) AS notifications`),
+    pool.query(`SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS database_mb FROM information_schema.tables WHERE table_schema = ?`, [dbConfig.database]),
+  ]);
+  res.json({
+    checkedAt: nowIso(),
+    services: [
+      { id: 'application', name: 'Application API', status: 'operational', detail: `${Date.now() - started} ms response` },
+      { id: 'database', name: 'MySQL database', status: 'operational', detail: `${Number(storage[0]?.database_mb) || 0} MB used` },
+      { id: 'email', name: 'Email delivery', status: isSmtpConfigured() ? 'operational' : 'warning', detail: isSmtpConfigured() ? 'SMTP configured' : 'SMTP not configured' },
+      { id: 'backup', name: 'Database backup', status: 'warning', detail: 'Connect backup provider to verify status' },
+    ],
+    usage: counts[0] || {},
+  });
+});
+
+app.get('/api/platform/settings', authenticate, requireSuperadmin, async (req, res) => {
+  const [rows] = await pool.execute('SELECT setting_key, setting_value, updated_at FROM platform_settings ORDER BY setting_key');
+  const settings = Object.fromEntries(rows.map((row) => [row.setting_key, decodeJson(row.setting_value, row.setting_value)]));
+  res.json({ settings: { sessionTimeoutMinutes: 15, passwordMinLength: 12, requireMfa: true, retentionDays: 2555, maxUploadMb: 5, ...settings } });
+});
+
+app.patch('/api/platform/settings', authenticate, requireSuperadmin, async (req, res) => {
+  const allowed = new Set(['sessionTimeoutMinutes', 'passwordMinLength', 'requireMfa', 'retentionDays', 'maxUploadMb', 'maintenanceNotice']);
+  const entries = Object.entries(req.body || {}).filter(([key]) => allowed.has(key));
+  if (!entries.length) return res.status(400).json({ error: 'No supported settings supplied' });
+  const previous = {};
+  for (const [key, value] of entries) {
+    const [rows] = await pool.execute('SELECT setting_value FROM platform_settings WHERE setting_key = ?', [key]);
+    previous[key] = rows[0] ? decodeJson(rows[0].setting_value, rows[0].setting_value) : null;
+    await pool.execute(`INSERT INTO platform_settings (setting_key, setting_value, updated_by, updated_at) VALUES (?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by = VALUES(updated_by), updated_at = VALUES(updated_at)`, [key, encodeJson(value), req.user.id, nowIso()]);
+  }
+  await recordPlatformAudit(req.user, { category: 'configuration', action: 'platform.settings_updated', targetType: 'platform_settings', previousValue: previous, newValue: Object.fromEntries(entries), reason: normalizeString(req.body?.reason) || 'Platform configuration update' }, req);
+  res.json({ status: 'updated' });
+});
+
+app.get('/api/organization/overview', authenticate, async (req, res) => {
+  if (!isOrganizationAdmin(req.user) || !req.user.organizationId) {
+    return res.status(403).json({ error: 'Only Organization Admin can view the organization overview' });
+  }
+  const organizationId = req.user.organizationId;
+  const [[organizationRows], [userRows], [workerRows], [permitRows], [siteRows], [activityRows]] = await Promise.all([
+    pool.query('SELECT * FROM organizations WHERE id = ? LIMIT 1', [organizationId]),
+    pool.query(`SELECT COUNT(*) AS total, SUM(account_status = 'active') AS active FROM users WHERE organization_id = ?`, [organizationId]),
+    pool.query(`SELECT COUNT(*) AS total, SUM(status = 'valid') AS active, SUM(status = 'inactive') AS inactive FROM workers WHERE organization_id = ?`, [organizationId]),
+    pool.query(`SELECT COUNT(*) AS total, SUM(status = 'active') AS active, SUM(status IN ('submitted', 'stage1_complete', 'approved')) AS awaiting FROM permits WHERE organization_id = ?`, [organizationId]),
+    pool.query(`SELECT COUNT(*) AS total, SUM(status = 'active') AS active FROM organization_sites WHERE organization_id = ?`, [organizationId]),
+    pool.query(`SELECT id, occurred_at, actor_name, actor_role, category, action, target_type, reason, result FROM platform_audit_logs WHERE organization_id = ? ORDER BY occurred_at DESC LIMIT 8`, [organizationId]),
+  ]);
+  const organization = organizationRowToPlatformTenant(organizationRows[0]);
+  if (!organization) return res.status(404).json({ error: 'Organization not found' });
+  res.json({
+    organization,
+    metrics: {
+      users: Number(userRows[0]?.total) || 0,
+      activeUsers: Number(userRows[0]?.active) || 0,
+      workers: Number(workerRows[0]?.total) || 0,
+      activeWorkers: Number(workerRows[0]?.active) || 0,
+      inactiveWorkers: Number(workerRows[0]?.inactive) || 0,
+      permits: Number(permitRows[0]?.total) || 0,
+      activePermits: Number(permitRows[0]?.active) || 0,
+      awaitingPermits: Number(permitRows[0]?.awaiting) || 0,
+      sites: Number(siteRows[0]?.total) || 0,
+      activeSites: Number(siteRows[0]?.active) || 0,
+    },
+    recentActivity: activityRows,
+  });
+});
+
+app.get('/api/organization/profile', authenticate, async (req, res) => {
+  if (!isOrganizationAdmin(req.user) || !req.user.organizationId) {
+    return res.status(403).json({ error: 'Only Organization Admin can view company information' });
+  }
+  const organization = await getOrganizationById(req.user.organizationId);
+  if (!organization) return res.status(404).json({ error: 'Organization not found' });
+  res.json({ organization: organizationRowToPlatformTenant(organization) });
+});
+
+app.patch('/api/organization/profile', authenticate, async (req, res) => {
+  if (!isOrganizationAdmin(req.user) || !req.user.organizationId) {
+    return res.status(403).json({ error: 'Only Organization Admin can update company information' });
+  }
+  const existing = await getOrganizationById(req.user.organizationId);
+  if (!existing) return res.status(404).json({ error: 'Organization not found' });
+  const profile = {
+    name: normalizeString(req.body?.name || existing.name),
+    registrationNo: normalizeString(req.body?.registrationNo || existing.registration_no),
+    contactEmail: normalizeEmail(req.body?.contactEmail || existing.contact_email),
+    contactNumber: normalizeString(req.body?.contactNumber || existing.contact_number),
+    registeredAddress: normalizeString(req.body?.registeredAddress || existing.registered_address),
+    primaryContactName: normalizeString(req.body?.primaryContactName || existing.primary_contact_name),
+    serviceTier: normalizeString(req.body?.serviceTier || existing.service_tier || 'standard').toLowerCase(),
+  };
+  if (!Object.values(profile).every(Boolean)) {
+    return res.status(400).json({ error: 'Complete all required company profile fields' });
+  }
+  if (!['standard', 'professional', 'enterprise'].includes(profile.serviceTier)) {
+    return res.status(400).json({ error: 'Select a valid service tier' });
+  }
+  const [registrationMatches] = await pool.execute(
+    'SELECT id FROM organizations WHERE registration_no = ? AND id <> ? LIMIT 1',
+    [profile.registrationNo, existing.id],
+  );
+  if (registrationMatches.length) {
+    return res.status(409).json({ error: 'Registration number is already in use' });
+  }
+  const timestamp = nowIso();
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    await connection.execute(`UPDATE organizations SET name = ?, registration_no = ?, contact_email = ?, contact_number = ?, registered_address = ?, primary_contact_name = ?, service_tier = ?, updated_at = ? WHERE id = ?`, [
+      profile.name, profile.registrationNo, profile.contactEmail, profile.contactNumber, profile.registeredAddress, profile.primaryContactName, profile.serviceTier, timestamp, existing.id,
+    ]);
+    await connection.execute(`UPDATE users SET organization = ?, updated_at = ? WHERE organization_id = ?`, [profile.name, timestamp, existing.id]);
+    await recordPlatformAudit(req.user, {
+      organizationId: existing.id, category: 'tenant_administration', action: 'organization.profile_updated', targetType: 'organization', targetId: existing.id,
+      previousValue: { name: existing.name, registrationNo: existing.registration_no, contactEmail: existing.contact_email, contactNumber: existing.contact_number, registeredAddress: existing.registered_address, primaryContactName: existing.primary_contact_name, serviceTier: existing.service_tier || 'standard' },
+      newValue: profile, reason: normalizeString(req.body?.reason) || 'Company profile updated by Tenant Admin',
+    }, req, connection);
+    await connection.commit();
+    res.json({ organization: organizationRowToPlatformTenant(await getOrganizationById(existing.id)) });
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+});
+
+app.get('/api/organization/sites', authenticate, async (req, res) => {
+  if (!isOrganizationAdmin(req.user) || !req.user.organizationId) {
+    return res.status(403).json({ error: 'Only Organization Admin can manage sites' });
+  }
+  const [rows] = await pool.execute('SELECT * FROM organization_sites WHERE organization_id = ? ORDER BY status, name', [req.user.organizationId]);
+  res.json({ sites: rows.map((row) => ({ id: row.id, name: row.name, code: row.code, address: row.address || '', workAreas: decodeJson(row.work_areas), status: row.status, createdAt: row.created_at, updatedAt: row.updated_at })) });
+});
+
+app.post('/api/organization/sites', authenticate, async (req, res) => {
+  if (!isOrganizationAdmin(req.user) || !req.user.organizationId) {
+    return res.status(403).json({ error: 'Only Organization Admin can create sites' });
+  }
+  const name = normalizeString(req.body?.name);
+  const code = normalizeString(req.body?.code).toUpperCase();
+  const address = normalizeString(req.body?.address);
+  const workAreas = Array.isArray(req.body?.workAreas) ? req.body.workAreas.map(normalizeString).filter(Boolean) : String(req.body?.workAreas || '').split(/\r?\n|,/).map(normalizeString).filter(Boolean);
+  if (!name || !code || !address) return res.status(400).json({ error: 'Site name, code, and address are required' });
+  const id = createId();
+  const timestamp = nowIso();
+  try {
+    await pool.execute(`INSERT INTO organization_sites (id, organization_id, name, code, address, work_areas, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)`, [id, req.user.organizationId, name, code, address, encodeJson(workAreas), timestamp, timestamp]);
+  } catch (error) {
+    if (error?.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'This site code is already used by your organization' });
+    throw error;
+  }
+  await recordPlatformAudit(req.user, { organizationId: req.user.organizationId, category: 'tenant_administration', action: 'site.created', targetType: 'site', targetId: id, newValue: { name, code, address, workAreas }, reason: 'Site created by Tenant Admin' }, req);
+  res.status(201).json({ site: { id, name, code, address, workAreas, status: 'active', createdAt: timestamp, updatedAt: timestamp } });
+});
+
+app.patch('/api/organization/sites/:id', authenticate, async (req, res) => {
+  if (!isOrganizationAdmin(req.user) || !req.user.organizationId) {
+    return res.status(403).json({ error: 'Only Organization Admin can update sites' });
+  }
+  const [rows] = await pool.execute('SELECT * FROM organization_sites WHERE id = ? AND organization_id = ? LIMIT 1', [req.params.id, req.user.organizationId]);
+  const existing = rows[0];
+  if (!existing) return res.status(404).json({ error: 'Site not found' });
+  const name = normalizeString(req.body?.name || existing.name);
+  const code = normalizeString(req.body?.code || existing.code).toUpperCase();
+  const address = normalizeString(req.body?.address || existing.address);
+  const status = normalizeString(req.body?.status || existing.status).toLowerCase();
+  const workAreas = Object.prototype.hasOwnProperty.call(req.body || {}, 'workAreas')
+    ? (Array.isArray(req.body.workAreas) ? req.body.workAreas : String(req.body.workAreas || '').split(/\r?\n|,/)).map(normalizeString).filter(Boolean)
+    : decodeJson(existing.work_areas);
+  if (!['active', 'inactive'].includes(status)) return res.status(400).json({ error: 'Site status must be active or inactive' });
+  const timestamp = nowIso();
+  try {
+    await pool.execute(`UPDATE organization_sites SET name = ?, code = ?, address = ?, work_areas = ?, status = ?, updated_at = ? WHERE id = ? AND organization_id = ?`, [name, code, address, encodeJson(workAreas), status, timestamp, existing.id, req.user.organizationId]);
+  } catch (error) {
+    if (error?.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'This site code is already used by your organization' });
+    throw error;
+  }
+  await recordPlatformAudit(req.user, { organizationId: req.user.organizationId, category: 'tenant_administration', action: status !== existing.status ? `site.${status}` : 'site.updated', targetType: 'site', targetId: existing.id, previousValue: existing, newValue: { name, code, address, workAreas, status }, reason: normalizeString(req.body?.reason) || 'Site updated by Tenant Admin' }, req);
+  res.json({ site: { id: existing.id, name, code, address, workAreas, status, createdAt: existing.created_at, updatedAt: timestamp } });
+});
+
+app.get('/api/organization/settings', authenticate, async (req, res) => {
+  if (!isOrganizationAdmin(req.user) || !req.user.organizationId) {
+    return res.status(403).json({ error: 'Only Organization Admin can view company settings' });
+  }
+  const organization = await getOrganizationById(req.user.organizationId);
+  if (!organization) return res.status(404).json({ error: 'Organization not found' });
+  const defaults = { timezone: 'Asia/Kuala_Lumpur', permitPrefix: 'PTW', requireSiteSelection: true, emailNotifications: true, allowEmergencyPermits: true };
+  res.json({ settings: { ...defaults, ...decodeJson(organization.tenant_settings, {}) }, enabledModules: decodeJson(organization.enabled_modules) });
+});
+
+app.patch('/api/organization/settings', authenticate, async (req, res) => {
+  if (!isOrganizationAdmin(req.user) || !req.user.organizationId) {
+    return res.status(403).json({ error: 'Only Organization Admin can update company settings' });
+  }
+  const organization = await getOrganizationById(req.user.organizationId);
+  if (!organization) return res.status(404).json({ error: 'Organization not found' });
+  const previous = decodeJson(organization.tenant_settings, {});
+  const settings = {
+    timezone: normalizeString(req.body?.timezone) || previous.timezone || 'Asia/Kuala_Lumpur',
+    permitPrefix: (normalizeString(req.body?.permitPrefix) || previous.permitPrefix || 'PTW').toUpperCase().slice(0, 12),
+    requireSiteSelection: Boolean(req.body?.requireSiteSelection),
+    emailNotifications: Boolean(req.body?.emailNotifications),
+    allowEmergencyPermits: Boolean(req.body?.allowEmergencyPermits),
+  };
+  await pool.execute('UPDATE organizations SET tenant_settings = ?, updated_at = ? WHERE id = ?', [encodeJson(settings), nowIso(), organization.id]);
+  await recordPlatformAudit(req.user, { organizationId: organization.id, category: 'configuration', action: 'organization.settings_updated', targetType: 'organization_settings', targetId: organization.id, previousValue: previous, newValue: settings, reason: normalizeString(req.body?.reason) || 'Company PTW settings updated' }, req);
+  res.json({ settings });
+});
+
+app.get('/api/organization/audit', authenticate, async (req, res) => {
+  if (!isOrganizationAdmin(req.user) || !req.user.organizationId) {
+    return res.status(403).json({ error: 'Only Organization Admin can view company audit logs' });
+  }
+  const category = normalizeString(req.query.category);
+  const params = [req.user.organizationId];
+  let categoryClause = '';
+  if (category && category !== 'permit_workflow') { categoryClause = ' AND category = ?'; params.push(category); }
+  const [platformRows] = category === 'permit_workflow' ? [[]] : await pool.execute(`SELECT * FROM platform_audit_logs WHERE organization_id = ?${categoryClause} ORDER BY occurred_at DESC LIMIT 250`, params);
+  let permitRows = [];
+  if (!category || category === 'permit_workflow') {
+    [permitRows] = await pool.execute(`SELECT id, occurred_at, actor_user_id, actor_name, actor_role, organization_id, 'permit_workflow' AS category, action, 'permit' AS target_type, permit_id AS target_id, NULL AS previous_value, NULL AS new_value, comment AS reason, NULL AS ip_address, 'success' AS result FROM audit_logs WHERE organization_id = ? ORDER BY occurred_at DESC LIMIT 250`, [req.user.organizationId]);
+  }
+  const logs = [...platformRows, ...permitRows].sort((a, b) => String(b.occurred_at).localeCompare(String(a.occurred_at))).slice(0, 250);
+  res.json({ count: logs.length, logs });
+});
+
+app.patch('/api/organization/workers/:id/status', authenticate, async (req, res) => {
+  if (!isOrganizationAdmin(req.user) || !req.user.organizationId) {
+    return res.status(403).json({ error: 'Only Organization Admin can manage worker access' });
+  }
+  const worker = await getWorkerById(req.params.id);
+  if (!worker || worker.organizationId !== req.user.organizationId) return res.status(404).json({ error: 'Worker not found' });
+  const status = normalizeString(req.body?.status).toLowerCase();
+  if (!['valid', 'inactive'].includes(status)) return res.status(400).json({ error: 'Worker status must be valid or inactive' });
+  const updated = await updateWorkerStatus(worker.id, status, status === 'inactive' ? normalizeString(req.body?.reason) || 'Deactivated by Organization Admin' : '');
+  if (status === 'inactive') await deactivateLinkedWorkerAccount(updated);
+  if (status === 'valid') await ensureApprovedWorkerAccount(updated);
+  await recordPlatformAudit(req.user, { organizationId: req.user.organizationId, category: 'tenant_administration', action: `worker.${status === 'valid' ? 'activated' : 'deactivated'}`, targetType: 'worker', targetId: worker.id, previousValue: { status: worker.status }, newValue: { status }, reason: normalizeString(req.body?.reason) || 'Worker access updated by Tenant Admin' }, req);
+  res.json({ worker: updated });
 });
 
 app.get('/api/users', authenticate, async (req, res) => {
@@ -4777,14 +5700,20 @@ app.post('/api/users', authenticate, async (req, res) => {
     });
   }
 
-  const { fullName, email } = req.body || {};
+  const { fullName, email, password, confirmPassword } = req.body || {};
   const requestedRoles = sortApplicationRoles(
     normalizeUserRoles(req.body?.roles || req.body?.role)
       .filter((role) => ADMIN_ASSIGNABLE_ROLES.includes(role)),
   );
 
-  if (!fullName || !email) {
-    return res.status(400).json({ error: 'Full name and work email are required' });
+  if (!fullName || !email || !password) {
+    return res.status(400).json({ error: 'Full name, work email, and password are required' });
+  }
+  if (String(password).length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  }
+  if (password !== confirmPassword) {
+    return res.status(400).json({ error: 'Passwords do not match' });
   }
 
   if (!requestedRoles.length) {
@@ -4806,8 +5735,13 @@ app.post('/api/users', authenticate, async (req, res) => {
     companyRegistrationNo: req.user.companyRegistrationNo,
     role: requestedRoles[0],
     roles: requestedRoles,
-    password: DEFAULT_TEAM_USER_PASSWORD,
+    password: String(password),
   });
+
+  await recordPlatformAudit(req.user, {
+    organizationId: req.user.organizationId, category: 'tenant_administration', action: 'user.created', targetType: 'user', targetId: user.id,
+    newValue: { fullName: user.fullName, email: user.email, roles: user.roles, accountStatus: user.accountStatus }, reason: 'Team account created by Tenant Admin',
+  }, req);
 
   res.status(201).json({
     user: sanitizeUser(user),
@@ -4869,6 +5803,10 @@ app.patch('/api/users/:id', authenticate, async (req, res) => {
     email,
     roles: requestedRoles,
   });
+  await recordPlatformAudit(req.user, {
+    organizationId: req.user.organizationId, category: 'tenant_administration', action: 'user.updated', targetType: 'user', targetId: existing.id,
+    previousValue: { fullName: existing.fullName, email: existing.email, roles: existing.roles }, newValue: { fullName: user.fullName, email: user.email, roles: user.roles }, reason: 'Team account updated by Tenant Admin',
+  }, req);
   return res.json({ user: sanitizeUser(user) });
 });
 
@@ -4899,6 +5837,10 @@ app.patch('/api/users/:id/access', authenticate, async (req, res) => {
   }
 
   const user = await updateManagedUserAccess(existing.id, status);
+  await recordPlatformAudit(req.user, {
+    organizationId: req.user.organizationId, category: 'tenant_administration', action: `user.${status === 'active' ? 'activated' : 'deactivated'}`, targetType: 'user', targetId: existing.id,
+    previousValue: { accountStatus: existing.accountStatus }, newValue: { accountStatus: status }, reason: 'User access updated by Tenant Admin',
+  }, req);
   return res.json({ user: sanitizeUser(user) });
 });
 
@@ -4925,6 +5867,10 @@ app.delete('/api/users/:id', authenticate, async (req, res) => {
 
   try {
     await deleteManagedUser(existing.id);
+    await recordPlatformAudit(req.user, {
+      organizationId: req.user.organizationId, category: 'tenant_administration', action: 'user.deleted', targetType: 'user', targetId: existing.id,
+      previousValue: { fullName: existing.fullName, email: existing.email, roles: existing.roles }, reason: 'Unused team account deleted by Tenant Admin',
+    }, req);
     return res.json({ status: 'deleted', id: existing.id });
   } catch (error) {
     if (error?.code === 'ER_ROW_IS_REFERENCED_2' || error?.errno === 1451) {
@@ -5018,13 +5964,87 @@ app.patch('/api/notifications/:id/read', authenticate, async (req, res) => {
 });
 
 app.post('/api/auth/logout', authenticate, async (req, res) => {
-  await updateUserToken(req.user.id, null);
+  await revokeAuthToken(req.authToken);
+  await pool.execute('UPDATE users SET token = NULL, updated_at = ? WHERE id = ? AND token = ?', [nowIso(), req.user.id, req.authToken]);
   res.json({ status: 'ok' });
 });
 
 app.patch('/api/account', authenticate, async (req, res) => {
   const user = await updateUserAddress(req.user.id, req.body?.address);
   res.json({ user: sanitizeUser(user) });
+});
+
+app.get('/api/account/platform-profile', authenticate, requireSuperadmin, async (req, res) => {
+  res.json({
+    user: sanitizeUser(req.user),
+    company: await getPlatformOwnerProfile(req.user),
+  });
+});
+
+app.patch('/api/account/platform-profile', authenticate, requireSuperadmin, async (req, res) => {
+  const fullName = normalizeString(req.body?.fullName).slice(0, 255);
+  const email = normalizeEmail(req.body?.email).slice(0, 255);
+  const company = {
+    companyName: normalizeString(req.body?.companyName).slice(0, 255),
+    registrationNo: normalizeString(req.body?.registrationNo).slice(0, 120),
+    companyEmail: normalizeEmail(req.body?.companyEmail).slice(0, 255),
+    contactNumber: normalizeString(req.body?.contactNumber).slice(0, 80),
+    website: normalizeString(req.body?.website).slice(0, 255),
+    registeredAddress: normalizeString(req.body?.registeredAddress).slice(0, 1000),
+  };
+  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  if (!fullName || !email || !company.companyName) {
+    return res.status(400).json({ error: 'Superadmin name, email, and managing company name are required' });
+  }
+  if (!emailPattern.test(email) || (company.companyEmail && !emailPattern.test(company.companyEmail))) {
+    return res.status(400).json({ error: 'Enter a valid email address' });
+  }
+
+  const duplicate = await getUserByEmail(email);
+  if (duplicate && duplicate.id !== req.user.id) {
+    return res.status(409).json({ error: 'This email is already used by another account' });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const previousCompany = await getPlatformOwnerProfile(req.user, connection);
+    await connection.execute(
+      `UPDATE users
+       SET full_name = ?, email = ?, organization = ?, company_registration_no = ?, updated_at = ?
+       WHERE id = ?`,
+      [fullName, email, company.companyName, company.registrationNo || null, nowIso(), req.user.id],
+    );
+    await connection.execute(
+      `INSERT INTO platform_settings (setting_key, setting_value, updated_by, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by = VALUES(updated_by), updated_at = VALUES(updated_at)`,
+      ['platformOwnerProfile', encodeJson(company), req.user.id, nowIso()],
+    );
+    await recordPlatformAudit(req.user, {
+      category: 'configuration',
+      action: 'platform.owner_profile_updated',
+      targetType: 'platform_profile',
+      targetId: req.user.id,
+      previousValue: {
+        fullName: req.user.fullName,
+        email: req.user.email,
+        company: previousCompany,
+      },
+      newValue: { fullName, email, company },
+      reason: 'Platform owner profile updated by Superadmin',
+    }, req, connection);
+    await connection.commit();
+
+    const user = await getUserById(req.user.id);
+    return res.json({ user: sanitizeUser(user), company });
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 });
 
 app.patch('/api/account/organization', authenticate, async (req, res) => {
@@ -5130,8 +6150,8 @@ app.get('/api/workers', authenticate, async (req, res) => {
 });
 
 app.post('/api/workers', authenticate, async (req, res) => {
-  if (!isAdmin(req.user)) {
-    return res.status(403).json({ error: 'Only admin may add worker profiles' });
+  if (!isAdmin(req.user) && !isOrganizationAdmin(req.user)) {
+    return res.status(403).json({ error: 'Only admin or Organization Admin may add worker profiles' });
   }
 
   const {
@@ -5190,6 +6210,23 @@ app.post('/api/workers', authenticate, async (req, res) => {
     );
     if (String(worker.status || '').toLowerCase() === 'submitted') {
       await safelyNotify('worker submitted', () => notifyWorkerSubmitted(worker, req.user));
+    }
+    if (isOrganizationAdmin(req.user)) {
+      await recordPlatformAudit(req.user, {
+        organizationId: req.user.organizationId,
+        category: 'tenant_administration',
+        action: 'worker.created',
+        targetType: 'worker',
+        targetId: worker.id,
+        newValue: {
+          name: worker.name,
+          employeeId: worker.employeeId,
+          role: worker.role,
+          permits: worker.permits,
+          status: worker.status,
+        },
+        reason: 'Worker profile and approved work types added by Tenant Admin',
+      }, req);
     }
     return res.status(201).json(worker);
   } catch (e) {

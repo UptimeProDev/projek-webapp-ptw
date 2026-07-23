@@ -30,6 +30,7 @@ if ("scrollRestoration" in history) {
 }
 
 const roleLabels = {
+  superadmin: "Platform Superadmin",
   organization_admin: "Organization Admin",
   requester: "Requester",
   supervisor: "Supervisor",
@@ -39,7 +40,7 @@ const roleLabels = {
   worker: "Worker",
 };
 
-const rolePriority = ["organization_admin", "admin", "safety_officer", "supervisor", "requester", "worker"];
+const rolePriority = ["superadmin", "organization_admin", "admin", "safety_officer", "supervisor", "requester", "worker"];
 
 function isStaticHtmlPage() {
   return location.protocol === "file:" || /\.html$/i.test(location.pathname);
@@ -55,6 +56,7 @@ function getAuthUrl(mode) {
 
 function getAppUrl(page) {
   if (isStaticHtmlPage()) {
+    if (page === "superadmin") return "/superadmin.html";
     if (page === "admin") return "/admin.html";
     if (page === "organization") return "/organization.html";
     if (page === "safety") return "/safety.html";
@@ -68,6 +70,7 @@ function getAppUrl(page) {
 }
 
 function getRoleDestination(role) {
+  if (role === "superadmin") return getAppUrl("superadmin");
   if (role === "requester") return getAppUrl("dashboard");
   if (role === "organization_admin") return getAppUrl("organization");
   if (role === "admin") return getAppUrl("admin");
@@ -164,15 +167,7 @@ function validateSignupStep(step) {
 }
 
 function getInitialMode() {
-  if (location.hash === "#login") {
-    return "login";
-  }
-
-  if (location.hash === "#signup") {
-    return "signup";
-  }
-
-  return location.pathname === "/login" ? "login" : "signup";
+  return "login";
 }
 
 function setMessage(element, message, type = "error") {
@@ -285,7 +280,10 @@ function renderSession(user) {
 }
 
 function getUserRoles(user) {
-  const roles = Array.isArray(user?.roles) ? user.roles : [user?.role];
+  const roles = [
+    ...(Array.isArray(user?.roles) ? user.roles : []),
+    user?.role,
+  ];
   return roles
     .map((role) => String(role || "").trim().toLowerCase())
     .map((role) => role === "approver" ? "supervisor" : role)

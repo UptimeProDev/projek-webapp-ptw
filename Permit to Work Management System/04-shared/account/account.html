@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Account | PTW Guardian</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/account.css?v=5" />
+  <link rel="stylesheet" href="/account.css?v=6" />
+  <link rel="stylesheet" href="/responsive.css?v=1" />
 </head>
 <body>
   <main class="account-shell">
@@ -13,8 +14,8 @@
       <div class="brand">
         <div class="brand-mark">PTW</div>
         <div>
-          <h1>Account</h1>
-          <p>Profile and security</p>
+          <h1 id="accountTitle">Account</h1>
+          <p id="accountSubtitle">Profile and security</p>
         </div>
       </div>
       <div class="topbar-actions">
@@ -70,15 +71,30 @@
           <form id="passwordForm" class="form-grid">
             <label class="field wide">
               <span>Current password</span>
-              <input id="currentPassword" name="currentPassword" type="password" autocomplete="current-password" required />
+              <span class="password-control">
+                <input id="currentPassword" name="currentPassword" type="password" autocomplete="current-password" required />
+                <button class="password-toggle" type="button" data-password-toggle="currentPassword" aria-label="Show current password" aria-pressed="false">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle><path class="password-toggle-slash" d="M4 4l16 16"></path></svg>
+                </button>
+              </span>
             </label>
             <label class="field">
               <span>New password</span>
-              <input id="newPassword" name="newPassword" type="password" autocomplete="new-password" minlength="8" required />
+              <span class="password-control">
+                <input id="newPassword" name="newPassword" type="password" autocomplete="new-password" minlength="8" required />
+                <button class="password-toggle" type="button" data-password-toggle="newPassword" aria-label="Show new password" aria-pressed="false">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle><path class="password-toggle-slash" d="M4 4l16 16"></path></svg>
+                </button>
+              </span>
             </label>
             <label class="field">
               <span>Confirm password</span>
-              <input id="confirmPassword" name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required />
+              <span class="password-control">
+                <input id="confirmPassword" name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required />
+                <button class="password-toggle" type="button" data-password-toggle="confirmPassword" aria-label="Show confirmation password" aria-pressed="false">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle><path class="password-toggle-slash" d="M4 4l16 16"></path></svg>
+                </button>
+              </span>
             </label>
             <div class="form-actions wide">
               <button class="dark-button" type="submit">Change password</button>
@@ -88,7 +104,62 @@
       </div>
 
       <div class="account-column">
-        <section class="form-panel">
+        <section class="form-panel platform-access-panel hidden" id="platformAccessPanel">
+          <div class="section-head">
+            <span class="section-kicker">Platform owner profile</span>
+            <h2 id="platformCompanyHeading">UPTIME PRO ENGINEERING SDN. BHD.</h2>
+            <p>Manage the Superadmin identity and the company information shown for the organization operating PTW Guardian.</p>
+          </div>
+          <form id="platformProfileForm" class="form-grid">
+            <div class="form-subheading wide">
+              <strong>Superadmin details</strong>
+              <span>The account currently authorized to control the complete platform.</span>
+            </div>
+            <label class="field">
+              <span>Superadmin name *</span>
+              <input id="platformAdminName" name="fullName" maxlength="255" required />
+            </label>
+            <label class="field">
+              <span>Superadmin email *</span>
+              <input id="platformAdminEmail" name="email" type="email" maxlength="255" autocomplete="email" required />
+            </label>
+
+            <div class="form-subheading wide">
+              <strong>Managing company details</strong>
+              <span>The legal company responsible for operating this platform.</span>
+            </div>
+            <label class="field">
+              <span>Company name *</span>
+              <input id="platformCompanyName" name="companyName" maxlength="255" required value="UPTIME PRO ENGINEERING SDN. BHD." />
+            </label>
+            <label class="field">
+              <span>Company registration number</span>
+              <input id="platformRegistrationNo" name="registrationNo" maxlength="120" />
+            </label>
+            <label class="field">
+              <span>Company email</span>
+              <input id="platformCompanyEmail" name="companyEmail" type="email" maxlength="255" />
+            </label>
+            <label class="field">
+              <span>Contact number</span>
+              <input id="platformContactNumber" name="contactNumber" type="tel" maxlength="80" />
+            </label>
+            <label class="field wide">
+              <span>Company website</span>
+              <input id="platformWebsite" name="website" maxlength="255" placeholder="https://www.company.com" />
+            </label>
+            <label class="field wide">
+              <span>Registered business address</span>
+              <textarea id="platformRegisteredAddress" name="registeredAddress" rows="4" maxlength="1000"></textarea>
+            </label>
+            <div class="form-actions wide">
+              <button class="dark-button" type="submit">Save platform profile</button>
+            </div>
+          </form>
+          <p class="security-note"><strong>Account security:</strong> use the password section to update the Superadmin login password.</p>
+        </section>
+
+        <section class="form-panel" id="rolesSection">
           <div class="section-head">
             <h2>Roles</h2>
             <p>Open the dashboard you need for this session.</p>
@@ -98,7 +169,7 @@
           </div>
         </section>
 
-        <section class="form-panel">
+        <section class="form-panel" id="addressSection">
           <div class="section-head">
             <h2>Address</h2>
             <p>Keep your contact address available to PTW administrators.</p>
@@ -146,6 +217,6 @@
 
   <script src="/ptw-runtime.js?v=1"></script>
   <script src="/role-switcher.js?v=4"></script>
-  <script src="/account.js?v=6"></script>
+  <script src="/account.js?v=9"></script>
 </body>
 </html>

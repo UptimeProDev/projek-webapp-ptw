@@ -56,6 +56,10 @@ const routeFiles = new Map([
   ['/organization.html', roleFile('organization-admin', 'organization.html')],
   ['/organization.css', roleFile('organization-admin', 'organization.css')],
   ['/organization.js', roleFile('organization-admin', 'organization.js')],
+  ['/superadmin', roleFile('superadmin', 'superadmin.html')],
+  ['/superadmin.html', roleFile('superadmin', 'superadmin.html')],
+  ['/superadmin.css', roleFile('superadmin', 'superadmin.css')],
+  ['/superadmin.js', roleFile('superadmin', 'superadmin.js')],
   ['/admin', roleFile('admin', 'admin.html')],
   ['/admin.html', roleFile('admin', 'admin.html')],
   ['/admin.css', roleFile('admin', 'admin.css')],
@@ -86,6 +90,7 @@ const routeFiles = new Map([
   ['/support.js', sharedFile('support', 'support.js')],
   ['/role-switcher.js', sharedFile('scripts', 'role-switcher.js')],
   ['/ptw-flow.css', sharedFile('styles', 'ptw-flow.css')],
+  ['/responsive.css', sharedFile('styles', 'responsive.css')],
 ]);
 
 const server = http.createServer((req, res) => {

@@ -1,6 +1,7 @@
 (function () {
   const SESSION_KEY = "ptwSession";
   const roleLabels = {
+    superadmin: "Platform Superadmin",
     organization_admin: "Organization Admin",
     admin: "Admin",
     safety_officer: "Safety Officer",
@@ -9,8 +10,9 @@
     requester: "Requester",
     worker: "Worker",
   };
-  const rolePriority = ["organization_admin", "admin", "safety_officer", "supervisor", "requester", "worker"];
+  const rolePriority = ["superadmin", "organization_admin", "admin", "safety_officer", "supervisor", "requester", "worker"];
   const rolePaths = {
+    superadmin: "/superadmin",
     organization_admin: "/organization",
     admin: "/admin",
     safety_officer: "/safety",
@@ -64,6 +66,7 @@
 
   function currentPageRoles() {
     const path = window.location.pathname.toLowerCase();
+    if (path.includes("superadmin")) return ["superadmin"];
     if (path.includes("admin")) return ["admin"];
     if (path.includes("safety")) return ["safety_officer"];
     if (path.includes("review") || path.includes("supervisor") || path.includes("approver")) return ["supervisor"];

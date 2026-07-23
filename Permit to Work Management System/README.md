@@ -8,6 +8,7 @@ Organized source folder for the PTW Guardian web application.
 - `02-authentication/` - sign in, sign up, and activation pages.
 - `03-roles/` - role-specific screens:
   - `organization-admin/`
+  - `superadmin/` - platform owner control center for multi-company tenant governance
   - `requester/`
   - `admin/`
   - `safety-officer/`

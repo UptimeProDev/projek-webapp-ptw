@@ -6,7 +6,9 @@
   <title>Worker Portal | PTW Guardian</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/ptw-flow.css?v=2" />
-  <link rel="stylesheet" href="/worker.css?v=17" />
+  <link rel="stylesheet" href="/worker.css?v=18" />
+  <link rel="stylesheet" href="/responsive.css?v=1" />
+  <link rel="stylesheet" href="/role-sidebar.css?v=12" />
 </head>
 <body>
   <div class="worker-shell">
@@ -17,7 +19,7 @@
         <span></span>
       </button>
       <div class="brand">
-        <img class="brand-logo" src="/assets/ptw-guardian-brandmark-v3.png" alt="PTW Guardian" />
+        <img class="brand-logo" src="/assets/ptw-guardian-brandmark-sidebar.png" alt="PTW Guardian" />
       </div>
 
       <nav class="worker-nav">
@@ -68,20 +70,16 @@
           <input id="searchInput" type="search" placeholder="Search work type, permit ID, or location" />
         </label>
 
-        <button class="icon-button" type="button" id="refreshButton" aria-label="Refresh worker portal">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h8V3l-3.3 3.3Z" />
-          </svg>
+        <button class="icon-button refresh-button" type="button" id="refreshButton" aria-label="Refresh worker portal">
+          <span class="refresh-symbol" aria-hidden="true">&#8635;</span>
         </button>
 
         <div class="topbar-divider" aria-hidden="true"></div>
 
           <div class="notification-wrap">
-            <button class="icon-button" type="button" id="notificationButton" aria-label="Open notifications" aria-expanded="false" aria-controls="notificationPanel">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 22a2.4 2.4 0 0 0 2.3-1.8H9.7A2.4 2.4 0 0 0 12 22ZM5 17h14l-1.7-2.3V10a5.3 5.3 0 0 0-4.2-5.2V3a1.1 1.1 0 0 0-2.2 0v1.8A5.3 5.3 0 0 0 6.7 10v4.7L5 17Z" />
-              </svg>
-              <span class="notification-dot" aria-hidden="true"></span>
+            <button class="icon-button notification-button" type="button" id="notificationButton" aria-label="Open notifications" aria-expanded="false" aria-controls="notificationPanel">
+              <span class="notification-bell" aria-hidden="true">&#128276;</span>
+              <span class="notification-dot" id="notificationDot" aria-label="Unread notifications" hidden></span>
             </button>
             <div class="notification-panel" id="notificationPanel" hidden>
               <div class="notification-head">
@@ -89,7 +87,7 @@
                   <strong>Notifications</strong>
                   <span id="notificationCount">0 items</span>
                 </div>
-                <button class="link-button" type="button" id="notificationCloseButton">Close</button>
+                <div class="notification-actions"><button class="notification-read-all" type="button" id="notificationReadAllButton">Mark all as read</button><button class="link-button" type="button" id="notificationCloseButton">Close</button></div>
               </div>
               <div class="notification-list" id="notificationList"></div>
             </div>
@@ -137,7 +135,7 @@
         </article>
       </section>
 
-      <div class="status-line" id="statusLine">Worker portal ready.</div>
+      <div class="status-line hidden" id="statusLine" aria-live="polite">Worker portal ready.</div>
 
       <section class="worker-layout" id="workerWorkspace">
         <div class="permit-list">
@@ -187,8 +185,8 @@
     </main>
   </div>
 
-  <script src="/ptw-runtime.js?v=1"></script>
+  <script src="/ptw-runtime.js?v=9"></script>
   <script src="/role-switcher.js?v=4"></script>
-  <script src="/worker.js?v=11"></script>
+  <script src="/worker.js?v=15"></script>
 </body>
 </html>

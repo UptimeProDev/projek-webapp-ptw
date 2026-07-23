@@ -3,6 +3,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const API_BASE = window.location.protocol === 'file:' ? 'http://localhost:3000' : '';
 
   const elements = {
+    accountTitle: document.querySelector('#accountTitle'),
+    accountSubtitle: document.querySelector('#accountSubtitle'),
     backLink: document.querySelector('#backLink'),
     logoutButton: document.querySelector('#logoutButton'),
     profilePicture: document.querySelector('#profilePicture'),
@@ -20,11 +22,18 @@ document.addEventListener('DOMContentLoaded', () => {
     organizationForm: document.querySelector('#organizationForm'),
     organizationNameInput: document.querySelector('#organizationNameInput'),
     organizationRegistrationInput: document.querySelector('#organizationRegistrationInput'),
+    platformAccessPanel: document.querySelector('#platformAccessPanel'),
+    platformCompanyHeading: document.querySelector('#platformCompanyHeading'),
+    platformProfileForm: document.querySelector('#platformProfileForm'),
+    rolesSection: document.querySelector('#rolesSection'),
+    addressSection: document.querySelector('#addressSection'),
     passwordForm: document.querySelector('#passwordForm'),
     toast: document.querySelector('#toast'),
   };
 
   const roleHome = {
+    superadmin: '/superadmin',
+    platform_admin: '/superadmin',
     organization_admin: '/organization',
     requester: '/dashboard',
     admin: '/admin',
@@ -33,7 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
     safety_officer: '/safety',
     worker: '/worker',
   };
-  const rolePriority = ['organization_admin', 'admin', 'safety_officer', 'supervisor', 'requester', 'worker'];
+  const rolePriority = ['superadmin', 'platform_admin', 'organization_admin', 'admin', 'safety_officer', 'supervisor', 'requester', 'worker'];
 
   let session = readSession();
   let toastTimer;
@@ -84,7 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function getPreferredRole(user) {
     const roles = getUserRoles(user);
-    return ['organization_admin', 'admin', 'safety_officer', 'supervisor', 'requester', 'worker']
+    return rolePriority
       .find((role) => roles.includes(role)) || user?.role;
   }
 
@@ -150,9 +159,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const roles = getUserRoles(resolvedUser);
     const home = roleHome[getPreferredRole(resolvedUser)] || '/dashboard';
     const name = resolvedUser.fullName || resolvedUser.email || 'User';
+    const isPlatformOperator = hasRole(resolvedUser, 'superadmin') || hasRole(resolvedUser, 'platform_admin');
     elements.backLink.href = home;
+    elements.accountTitle.textContent = isPlatformOperator ? 'Platform Superadmin Profile' : 'Account';
+    elements.accountSubtitle.textContent = isPlatformOperator
+      ? 'Superadmin and managing company details'
+      : 'Profile and security';
     elements.profileName.textContent = name;
-    elements.profileMeta.textContent = `${roles.map(roleLabel).join(', ') || roleLabel(resolvedUser.role)} - ${resolvedUser.employeeId || resolvedUser.email || 'PTW user'}`;
+    elements.profileMeta.textContent = isPlatformOperator
+      ? `Platform Superadmin · ${resolvedUser.email || 'PTW Guardian'}`
+      : `${roles.map(roleLabel).join(', ') || roleLabel(resolvedUser.role)} - ${resolvedUser.employeeId || resolvedUser.email || 'PTW user'}`;
 
     if (resolvedUser.profilePictureUrl) {
       elements.profilePicture.innerHTML = `<img src="${resolvedUser.profilePictureUrl}" alt="">`;
@@ -168,6 +184,9 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.addressForm.postalCode.value = address.postalCode || '';
     elements.addressForm.country.value = address.country || '';
     elements.organizationPanel.classList.toggle('hidden', !hasRole(resolvedUser, 'organization_admin'));
+    elements.platformAccessPanel.classList.toggle('hidden', !isPlatformOperator);
+    elements.rolesSection.classList.toggle('hidden', isPlatformOperator);
+    elements.addressSection.classList.toggle('hidden', isPlatformOperator);
     if (hasRole(resolvedUser, 'organization_admin')) {
       elements.organizationNameInput.value = resolvedUser.organization || '';
       elements.organizationRegistrationInput.value = resolvedUser.companyRegistrationNo || '';
@@ -316,7 +335,61 @@ document.addEventListener('DOMContentLoaded', () => {
       body: JSON.stringify({ currentPassword, newPassword }),
     });
     elements.passwordForm.reset();
+    resetPasswordVisibility();
     showToast('Password changed.');
+  }
+
+  function populatePlatformProfile(result) {
+    const user = result?.user || session?.user || {};
+    const company = result?.company || {};
+    elements.platformProfileForm.fullName.value = user.fullName || '';
+    elements.platformProfileForm.email.value = user.email || '';
+    elements.platformProfileForm.companyName.value = company.companyName || 'UPTIME PRO ENGINEERING SDN. BHD.';
+    elements.platformCompanyHeading.textContent = company.companyName || 'UPTIME PRO ENGINEERING SDN. BHD.';
+    elements.platformProfileForm.registrationNo.value = company.registrationNo || '';
+    elements.platformProfileForm.companyEmail.value = company.companyEmail || '';
+    elements.platformProfileForm.contactNumber.value = company.contactNumber || '';
+    elements.platformProfileForm.website.value = company.website || '';
+    elements.platformProfileForm.registeredAddress.value = company.registeredAddress || '';
+  }
+
+  async function loadPlatformProfile() {
+    const result = await apiRequest('/api/account/platform-profile');
+    populatePlatformProfile(result);
+  }
+
+  async function savePlatformProfile(event) {
+    event.preventDefault();
+    const form = new FormData(elements.platformProfileForm);
+    const result = await apiRequest('/api/account/platform-profile', {
+      method: 'PATCH',
+      body: JSON.stringify(Object.fromEntries(form)),
+    });
+    updateStoredUser(result.user);
+    populatePlatformProfile(result);
+    showToast('Platform profile saved.');
+  }
+
+  function resetPasswordVisibility() {
+    document.querySelectorAll('[data-password-toggle]').forEach((button) => {
+      const input = document.querySelector(`#${button.dataset.passwordToggle}`);
+      if (!input) return;
+      input.type = 'password';
+      button.classList.remove('is-visible');
+      button.setAttribute('aria-pressed', 'false');
+      button.setAttribute('aria-label', `Show ${input.name === 'confirmPassword' ? 'confirmation ' : input.name === 'currentPassword' ? 'current ' : 'new '}password`);
+    });
+  }
+
+  function togglePassword(button) {
+    const input = document.querySelector(`#${button.dataset.passwordToggle}`);
+    if (!input) return;
+    const showPassword = input.type === 'password';
+    input.type = showPassword ? 'text' : 'password';
+    button.classList.toggle('is-visible', showPassword);
+    button.setAttribute('aria-pressed', String(showPassword));
+    const passwordName = input.name === 'confirmPassword' ? 'confirmation password' : input.name === 'currentPassword' ? 'current password' : 'new password';
+    button.setAttribute('aria-label', `${showPassword ? 'Hide' : 'Show'} ${passwordName}`);
   }
 
   async function logout() {
@@ -348,7 +421,14 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.passwordForm.addEventListener('submit', (event) => {
       changePassword(event).catch((error) => showToast(error.error || 'Could not change password.', 'error'));
     });
+    elements.platformProfileForm.addEventListener('submit', (event) => {
+      savePlatformProfile(event).catch((error) => showToast(error.error || 'Could not save platform profile.', 'error'));
+    });
     elements.logoutButton.addEventListener('click', logout);
+    elements.passwordForm.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-password-toggle]');
+      if (button) togglePassword(button);
+    });
     elements.roleList.addEventListener('click', (event) => {
       const button = event.target.closest('[data-switch-role]');
       if (!button) return;
@@ -357,6 +437,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       await refreshUser();
+      if (hasRole(session.user, 'superadmin') || hasRole(session.user, 'platform_admin')) {
+        await loadPlatformProfile();
+      }
     } catch (error) {
       showToast(error.error || 'Could not refresh account details.', 'error');
     }

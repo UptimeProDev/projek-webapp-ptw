@@ -2056,6 +2056,11 @@ body::before{
   }
 }
 
+/* Admin sidebar should open promptly while remaining an overlay. */
+.app-shell > .sidebar{
+  transition-duration:120ms;
+}
+
 @media (max-width:900px){
   .app-shell{
     padding-left:70px;
