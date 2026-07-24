@@ -18,5 +18,14 @@
     "express": "^5.2.1",
     "mysql2": "^3.22.4",
     "nodemailer": "^9.0.1"
-  }
+  },
+  "devDependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/UptimeProDev/projek-webapp-ptw.git"
+  },
+  "bugs": {
+    "url": "https://github.com/UptimeProDev/projek-webapp-ptw/issues"
+  },
+  "homepage": "https://github.com/UptimeProDev/projek-webapp-ptw#readme"
 }
